@@ -44,6 +44,18 @@ function renderField(shape, field) {
   label.textContent = field.label;
   row.appendChild(label);
 
+  if (field.kind === "toggle") {
+    const input = document.createElement("input");
+    input.type = "checkbox";
+    input.checked = Boolean(field.value);
+    input.style.flex = "0";
+    input.addEventListener("change", () => {
+      shape.setField(field.key, input.checked);
+    });
+    row.appendChild(input);
+    return row;
+  }
+
   if (field.kind === "text") {
     const input = document.createElement("input");
     input.type = "text";

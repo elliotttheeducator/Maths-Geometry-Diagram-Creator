@@ -44,6 +44,12 @@ export class Triangle {
     this.labels = labels;
     this.angleOverrides = [undefined, undefined, undefined];
     this.sideOverrides = [undefined, undefined, undefined];
+    // Exterior angle at vertex i: extends the incoming side (from the previous
+    // vertex) beyond vertex i into a ray, and labels the angle between that ray
+    // and the other side at i. Always display-only (180 - interior), like the
+    // parallel-lines crossing angles -- there's no independent way to set it.
+    this.exteriorExtended = [false, false, false];
+    this.exteriorOverrides = [undefined, undefined, undefined];
     this.selected = false;
     this.group = null;
     this.controller = null;
@@ -147,6 +153,25 @@ export class Triangle {
         value: this.labels[i],
       });
     }
+    for (let i = 0; i < 3; i++) {
+      fields.push({
+        key: `ext-toggle-${i}`,
+        group: "Exterior angle",
+        label: `Extend at ${this.labels[i]}`,
+        kind: "toggle",
+        value: this.exteriorExtended[i],
+      });
+      if (this.exteriorExtended[i]) {
+        const override = this.exteriorOverrides[i];
+        fields.push({
+          key: `ext-${i}`,
+          group: "Exterior angle",
+          label: `  value at ${this.labels[i]}`,
+          kind: "angle",
+          value: override !== undefined ? override : round1(180 - angles[i]),
+        });
+      }
+    }
     if (this._scaleBasePoints) {
       fields.unshift({
         key: "scale-factor",
@@ -168,6 +193,18 @@ export class Triangle {
     const idx = Number(idxStr);
     if (kind === "label") {
       this.setLabel(idx, String(value));
+      return;
+    }
+    if (key.startsWith("ext-toggle-")) {
+      this.exteriorExtended[Number(key.slice(11))] = Boolean(value);
+      this.notifyChange();
+      return;
+    }
+    if (key.startsWith("ext-")) {
+      const extIdx = Number(key.slice(4));
+      const str = String(value).trim();
+      this.exteriorOverrides[extIdx] = str === "" ? "" : str;
+      this.notifyChange();
       return;
     }
     if (kind !== "angle" && kind !== "side") return;
@@ -241,6 +278,11 @@ export class Triangle {
     // angle arcs / right-angle markers
     for (let i = 0; i < 3; i++) {
       this.group.appendChild(this.renderAngleMark(i, angles[i]));
+    }
+
+    // exterior angle extensions
+    for (let i = 0; i < 3; i++) {
+      if (this.exteriorExtended[i]) this.group.appendChild(this.renderExteriorAngle(i, angles[i]));
     }
 
     // side length labels
@@ -327,6 +369,57 @@ export class Triangle {
       })
     );
     return group;
+  }
+
+  // Extends the side (i-1 -> i) beyond vertex i, and labels the angle between
+  // that extension and the other side at i (always = 180 - interior angle at i).
+  renderExteriorAngle(i, interiorDeg) {
+    const V = this.points[i];
+    const F = this.points[(i + 2) % 3]; // base of the extended side
+    const R = this.points[(i + 1) % 3]; // the other neighbor, defines the exterior angle's far edge
+    const sideLen = dist(F, V);
+    const extLen = clamp(sideLen * 0.55, 40, 140);
+    const dirFV = { x: (V.x - F.x) / sideLen, y: (V.y - F.y) / sideLen };
+    const ext = { x: V.x + dirFV.x * extLen, y: V.y + dirFV.y * extLen };
+
+    const g = el("g");
+    g.appendChild(el("line", { x1: V.x, y1: V.y, x2: ext.x, y2: ext.y, class: "shape-line" }));
+
+    const dirExt = Math.atan2(ext.y - V.y, ext.x - V.x);
+    const dirR = Math.atan2(R.y - V.y, R.x - V.x);
+    const r = 22;
+    let diff = ((dirR - dirExt + Math.PI * 3) % (Math.PI * 2)) - Math.PI;
+    const sweepFlag = diff > 0 ? 1 : 0;
+    const start = { x: V.x + r * Math.cos(dirExt), y: V.y + r * Math.sin(dirExt) };
+    const end = { x: V.x + r * Math.cos(dirR), y: V.y + r * Math.sin(dirR) };
+    const bisector = dirExt + diff / 2;
+    const labelR = r + 16;
+    const lp = { x: V.x + labelR * Math.cos(bisector), y: V.y + labelR * Math.sin(bisector) };
+
+    const exteriorDeg = round1(180 - interiorDeg);
+    const hidden = this.exteriorOverrides[i] === "";
+
+    if (!hidden) {
+      g.appendChild(
+        el("path", { d: `M ${start.x} ${start.y} A ${r} ${r} 0 0 ${sweepFlag} ${end.x} ${end.y}`, class: "angle-arc" })
+      );
+    }
+    const displayValue = this.exteriorOverrides[i] !== undefined && this.exteriorOverrides[i] !== ""
+      ? this.exteriorOverrides[i]
+      : `${exteriorDeg}°`;
+    g.appendChild(
+      renderRemovableLabel({
+        x: lp.x,
+        y: lp.y,
+        value: displayValue,
+        hidden,
+        cssClass: "angle-label",
+        onRemove: () => this.setField(`ext-${i}`, ""),
+        onRestore: (e) => this.startInlineEdit(e, `ext-${i}`, exteriorDeg),
+        onDoubleClick: (e) => this.startInlineEdit(e, `ext-${i}`, displayValue),
+      })
+    );
+    return g;
   }
 
   renderSideLabel(i, from, to, centroid) {
