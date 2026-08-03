@@ -45,6 +45,16 @@ function renderField(shape, field) {
   label.textContent = field.label;
   row.appendChild(label);
 
+  if (field.locked) {
+    const lockBtn = document.createElement("button");
+    lockBtn.type = "button";
+    lockBtn.className = "lock-btn";
+    lockBtn.textContent = "🔒";
+    lockBtn.title = "Locked -- click to unlock (later edits elsewhere won't protect this value anymore)";
+    lockBtn.addEventListener("click", () => shape.unlockField(field.key));
+    row.appendChild(lockBtn);
+  }
+
   if (field.kind === "toggle") {
     const input = document.createElement("input");
     input.type = "checkbox";

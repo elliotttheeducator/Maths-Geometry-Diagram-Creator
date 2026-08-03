@@ -155,11 +155,21 @@ export class Triangle {
     } else {
       this.applyAngleRotation(vertexIndex, newDeg);
     }
+    this.verifyLocks();
   }
 
   lockSide(sideIndex, newLengthUnits) {
     this.sideLockUnits[sideIndex] = Math.max(0.2, newLengthUnits);
     this.pushLockOrder(`side:${sideIndex}`);
+
+    // If 2 angles are already locked, they fully determine the triangle's shape
+    // already -- this side lock should only set the *scale*, never disturb them.
+    const lockedAngles = [0, 1, 2].filter((i) => this.angleLockDeg[i] != null);
+    if (lockedAngles.length === 2) {
+      this.scaleToMatchSide(lockedAngles, sideIndex);
+      this.verifyLocks();
+      return;
+    }
 
     let lockedIdx = [0, 1, 2].filter((i) => this.sideLockUnits[i] != null);
     if (lockedIdx.length === 3) {
@@ -172,6 +182,43 @@ export class Triangle {
       this.placeFarPointsFromTwoSides(lockedIdx[0], lockedIdx[1]);
     } else {
       this.applySideMove(sideIndex, newLengthUnits);
+    }
+    this.verifyLocks();
+  }
+
+  // Uniformly rescales the whole triangle about vertex p (one of the 2 locked-angle
+  // vertices) so the given side hits its locked length exactly. A uniform scale
+  // preserves every angle, so both angle locks stay satisfied no matter which side
+  // is being resized.
+  scaleToMatchSide([p, q], sideIndex) {
+    this.placeApexFromTwoAngles(p, q);
+    const fromIdx = sideIndex;
+    const toIdx = (sideIndex + 1) % 3;
+    const targetPx = this.sideLockUnits[sideIndex] * PX_PER_UNIT;
+    const currentPx = dist(this.points[fromIdx], this.points[toIdx]);
+    if (currentPx < 1e-6) return;
+    const factor = targetPx / currentPx;
+    const anchor = this.points[p];
+    this.points = this.points.map((pt, i) =>
+      i === p ? pt : { x: anchor.x + (pt.x - anchor.x) * factor, y: anchor.y + (pt.y - anchor.y) * factor }
+    );
+  }
+
+  // Safety net: after any reconstruction, drop (un-lock) any field whose lock is no
+  // longer actually satisfied by the resulting geometry, rather than let its lock
+  // icon keep showing while quietly lying about what's protected.
+  verifyLocks() {
+    const angles = this.angles();
+    for (let i = 0; i < 3; i++) {
+      if (this.angleLockDeg[i] != null && Math.abs(angles[i] - this.angleLockDeg[i]) > 0.2) {
+        this.clearAngleLock(i);
+      }
+    }
+    const sides = this.sides();
+    for (let i = 0; i < 3; i++) {
+      if (this.sideLockUnits[i] != null && Math.abs(sides[i] / PX_PER_UNIT - this.sideLockUnits[i]) > 0.05) {
+        this.clearSideLock(i);
+      }
     }
   }
 
@@ -239,8 +286,9 @@ export class Triangle {
       fields.push({
         key: `angle-${i}`,
         group: "Angles",
-        label: `∠${this.labels[i]}${this.angleLockDeg[i] != null ? " 🔒" : ""}`,
+        label: `∠${this.labels[i]}`,
         kind: "angle",
+        locked: this.angleLockDeg[i] != null,
         value: this.angleOverrides[i] !== undefined ? this.angleOverrides[i] : round1(angles[i]),
       });
     }
@@ -248,8 +296,9 @@ export class Triangle {
       fields.push({
         key: `side-${i}`,
         group: "Side lengths",
-        label: `${sideNames[i]}${this.sideLockUnits[i] != null ? " 🔒" : ""}`,
+        label: sideNames[i],
         kind: "length",
+        locked: this.sideLockUnits[i] != null,
         value: this.sideOverrides[i] !== undefined ? this.sideOverrides[i] : round1(sides[i] / PX_PER_UNIT),
       });
     }
@@ -339,6 +388,16 @@ export class Triangle {
       });
     }
     return fields;
+  }
+
+  // Releases a lock directly (e.g. clicking its lock icon) without hiding or
+  // relabeling the field -- the value stays exactly as-is, just no longer protected.
+  unlockField(key) {
+    const [kind, idxStr] = key.split("-");
+    const idx = Number(idxStr);
+    if (kind === "angle") this.clearAngleLock(idx);
+    else if (kind === "side") this.clearSideLock(idx);
+    this.notifyChange();
   }
 
   setField(key, value) {
