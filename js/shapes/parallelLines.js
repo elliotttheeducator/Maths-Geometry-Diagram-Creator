@@ -1,25 +1,34 @@
-import { round1, nextId, PX_PER_UNIT, clamp, rotatePoint } from "../geometry.js";
+import { round1, nextId, PX_PER_UNIT, clamp, rayIntersection } from "../geometry.js";
 import { el, clear, toSvgPoint, renderRemovableLabel } from "../svgUtil.js";
 
 const DEG = Math.PI / 180;
+const MAX_LINES = 3;
+const MAX_TRANSVERSALS = 2;
 
-// Two parallel lines sharing one direction (`lineAngleDeg`) by construction --
-// they can never go out of parallel -- crossed by a transversal at `relAngleDeg`
-// (measured relative to the lines' own direction). Because both intersections use
-// the exact same two directions, the corresponding/alternate/co-interior angle
-// relationships are always numerically exact, not just visually close.
+// A stack of 2-3 parallel lines (sharing one direction, `lineAngleDeg`, so they can
+// never go out of parallel) crossed by 1-2 transversals, each at its own angle and
+// position. Every crossing gets the same stable 4-slot angle labeling used for a
+// simple pair, so corresponding/alternate/co-interior relationships stay numerically
+// exact everywhere, however many lines and transversals are on the canvas.
 
 export class ParallelLines {
-  constructor({ center, lineAngleDeg = 0, relAngleDeg = 65, gapPx = 150, id } = {}) {
+  constructor({
+    center,
+    lineAngleDeg = 0,
+    gapPx = 150,
+    lineCount = 2,
+    transversals,
+    id,
+  } = {}) {
     this.id = id || nextId("parallel");
     this.type = "parallel-lines";
     this.center = center || { x: 400, y: 350 };
     this.lineAngleDeg = lineAngleDeg;
-    this.relAngleDeg = relAngleDeg;
     this.gapPx = gapPx;
+    this.lineCount = lineCount;
+    this.transversals = transversals || [{ relAngleDeg: 65, along: 0 }];
     this.halfLineLen = 220;
-    // Keyed "T1-0".."T1-3" / "T2-0".."T2-3" -- see crossingAngles() for why slot
-    // index is stable (always the same physical angle) regardless of relAngleDeg.
+    // Keyed "T0-L1-0".."T0-L1-3" (transversal index - line index - slot 0-3).
     this.angleOverrides = {};
     this.selected = false;
     this.group = null;
@@ -29,35 +38,60 @@ export class ParallelLines {
   geometry() {
     const lineDir = { x: Math.cos(this.lineAngleDeg * DEG), y: Math.sin(this.lineAngleDeg * DEG) };
     const perpDir = { x: -lineDir.y, y: lineDir.x };
-    const half = this.gapPx / 2;
-    const line1Center = { x: this.center.x - perpDir.x * half, y: this.center.y - perpDir.y * half };
-    const line2Center = { x: this.center.x + perpDir.x * half, y: this.center.y + perpDir.y * half };
+    const n = this.lineCount;
+    const lineCenters = [];
+    for (let k = 0; k < n; k++) {
+      const off = (k - (n - 1) / 2) * this.gapPx;
+      lineCenters.push({ x: this.center.x + perpDir.x * off, y: this.center.y + perpDir.y * off });
+    }
+    const lineDirRad = Math.atan2(lineDir.y, lineDir.x);
 
-    const transAngleAbs = this.lineAngleDeg + this.relAngleDeg;
-    const transDir = { x: Math.cos(transAngleAbs * DEG), y: Math.sin(transAngleAbs * DEG) };
-    const denom = transDir.x * perpDir.x + transDir.y * perpDir.y;
-    const t = denom !== 0 ? this.gapPx / denom : 0;
+    const transversals = this.transversals.map((tr) => {
+      const transDirAbs = this.lineAngleDeg + tr.relAngleDeg;
+      const transDir = { x: Math.cos(transDirAbs * DEG), y: Math.sin(transDirAbs * DEG) };
+      const transDirRad = Math.atan2(transDir.y, transDir.x);
+      const T0 = { x: this.center.x + lineDir.x * tr.along, y: this.center.y + lineDir.y * tr.along };
+      const intersections = lineCenters.map((lc) => rayIntersection(T0, transDirRad, lc, lineDirRad));
+      return { relAngleDeg: tr.relAngleDeg, along: tr.along, transDir, transDirRad, T0, intersections };
+    });
 
-    const T1 = line1Center;
-    const T2 = { x: T1.x + transDir.x * t, y: T1.y + transDir.y * t };
-
-    return { lineDir, perpDir, line1Center, line2Center, transDir, T1, T2 };
+    return { lineDir, perpDir, lineDirRad, lineCenters, transversals };
   }
 
   // --- editing -----------------------------------------------------------
 
-  setRelAngle(deg) {
-    this.relAngleDeg = clamp(deg, 5, 175);
-    this.notifyChange();
-  }
-
   setLineAngle(deg) {
-    this.lineAngleDeg = ((deg % 360) + 360) % 360;
+    this.lineAngleDeg = (((deg % 360) + 360) % 360);
     this.notifyChange();
   }
 
   setGap(units) {
     this.gapPx = Math.max(30, units * PX_PER_UNIT);
+    this.notifyChange();
+  }
+
+  setLineCount(n) {
+    this.lineCount = clamp(n, 2, MAX_LINES);
+    this.notifyChange();
+  }
+
+  setTransversalCount(n) {
+    n = clamp(n, 1, MAX_TRANSVERSALS);
+    while (this.transversals.length < n) {
+      const idx = this.transversals.length;
+      this.transversals.push({ relAngleDeg: 115, along: idx * 90 });
+    }
+    while (this.transversals.length > n) this.transversals.pop();
+    this.notifyChange();
+  }
+
+  setTransversalAngle(idx, deg) {
+    this.transversals[idx].relAngleDeg = clamp(deg, 5, 175);
+    this.notifyChange();
+  }
+
+  setTransversalAlong(idx, units) {
+    this.transversals[idx].along = units * PX_PER_UNIT;
     this.notifyChange();
   }
 
@@ -71,61 +105,62 @@ export class ParallelLines {
     if (this.controller?.onChange) this.controller.onChange(this);
   }
 
-  // The 4 angle values at one intersection, in the fixed, stable slot order used
-  // by both crossingAngles() (rendering) and here (sidebar fields).
-  slotAngles() {
-    const rel = this.relAngleDeg;
+  // The 4 angle values at one crossing, in the fixed, stable slot order used by
+  // both renderCrossing() and here (sidebar fields) -- see renderCrossing() for why
+  // slot index is stable regardless of the transversal's angle.
+  slotAngles(relAngleDeg) {
+    const rel = relAngleDeg;
     return [rel, 180 - rel, rel, 180 - rel];
   }
 
   getFields() {
     const fields = [
-      {
-        key: "rel-angle",
-        group: "Angles",
-        label: "Transversal",
-        kind: "angle",
-        value: round1(this.relAngleDeg),
-      },
-      {
-        key: "line-angle",
-        group: "Angles",
-        label: "Lines direction",
-        kind: "angle",
-        value: round1(this.lineAngleDeg),
-      },
-      {
-        key: "gap",
-        group: "Spacing",
-        label: "Gap between lines",
-        kind: "length",
-        value: round1(this.gapPx / PX_PER_UNIT),
-      },
+      { key: "line-angle", group: "Lines", label: "Direction", kind: "angle", value: round1(this.lineAngleDeg) },
+      { key: "gap", group: "Lines", label: "Gap between lines", kind: "length", value: round1(this.gapPx / PX_PER_UNIT) },
+      { key: "add-line", group: "Lines", label: "3rd parallel line", kind: "toggle", value: this.lineCount >= 3 },
+      { key: "add-transversal", group: "Lines", label: "2nd transversal", kind: "toggle", value: this.transversals.length >= 2 },
     ];
-    const slots = this.slotAngles();
-    for (const prefix of ["T1", "T2"]) {
-      for (let i = 0; i < 4; i++) {
-        const key = `disp-${prefix}-${i}`;
-        const override = this.angleOverrides[key];
-        fields.push({
-          key,
-          group: prefix === "T1" ? "Angle labels (line 1)" : "Angle labels (line 2)",
-          label: `Angle ${i + 1}`,
-          kind: "angle",
-          value: override !== undefined ? override : round1(slots[i]),
-        });
+
+    this.transversals.forEach((tr, j) => {
+      const label = this.transversals.length > 1 ? `Transversal ${j + 1}` : "Transversal";
+      fields.push({ key: `trans-angle-${j}`, group: label, label: "Angle", kind: "angle", value: round1(tr.relAngleDeg) });
+      fields.push({
+        key: `trans-along-${j}`,
+        group: label,
+        label: "Position",
+        kind: "length",
+        value: round1(tr.along / PX_PER_UNIT),
+      });
+
+      const slots = this.slotAngles(tr.relAngleDeg);
+      for (let k = 0; k < this.lineCount; k++) {
+        for (let s = 0; s < 4; s++) {
+          const key = `disp-T${j}-L${k}-${s}`;
+          const override = this.angleOverrides[key];
+          fields.push({
+            key,
+            group: `${label} × Line ${k + 1}`,
+            label: `Angle ${s + 1}`,
+            kind: "angle",
+            value: override !== undefined ? override : round1(slots[s]),
+          });
+        }
       }
-    }
+    });
+
     return fields;
   }
 
   setField(key, value) {
-    if (key === "rel-angle") return this.setRelAngle(Number(value));
     if (key === "line-angle") return this.setLineAngle(Number(value));
     if (key === "gap") return this.setGap(Number(value));
+    if (key === "add-line") return this.setLineCount(value ? 3 : 2);
+    if (key === "add-transversal") return this.setTransversalCount(value ? 2 : 1);
+    if (key.startsWith("trans-angle-")) return this.setTransversalAngle(Number(key.slice(12)), Number(value));
+    if (key.startsWith("trans-along-")) return this.setTransversalAlong(Number(key.slice(12)), Number(value));
     if (key.startsWith("disp-")) {
-      // Display-only: these 4 angles per intersection are always derived from
-      // relAngleDeg, so typed text here only changes what's shown, never the geometry.
+      // Display-only: every crossing angle is derived from the shared line/transversal
+      // angles, so typed text here only changes what's shown, never the geometry.
       const str = String(value).trim();
       this.angleOverrides[key] = str === "" ? "" : str;
       this.notifyChange();
@@ -151,41 +186,42 @@ export class ParallelLines {
     const geo = this.geometry();
     const cls = this.selected ? "shape-line selected" : "shape-line";
 
-    const line1 = this.segment(geo.line1Center, geo.lineDir, this.halfLineLen);
-    const line2 = this.segment(geo.line2Center, geo.lineDir, this.halfLineLen);
-    const transExtra = 45;
-    const transStart = { x: geo.T1.x - geo.transDir.x * transExtra, y: geo.T1.y - geo.transDir.y * transExtra };
-    const transEnd = { x: geo.T2.x + geo.transDir.x * transExtra, y: geo.T2.y + geo.transDir.y * transExtra };
+    for (const lc of geo.lineCenters) {
+      const seg = this.segment(lc, geo.lineDir, this.halfLineLen);
+      this.group.appendChild(this.hitLine(seg.a, seg.b));
+      this.group.appendChild(el("line", { x1: seg.a.x, y1: seg.a.y, x2: seg.b.x, y2: seg.b.y, class: cls }));
+      this.group.appendChild(this.chevron(lc, geo.lineDir));
+    }
 
-    this.group.appendChild(this.hitLine(line1.a, line1.b));
-    this.group.appendChild(this.hitLine(line2.a, line2.b));
-    this.group.appendChild(el("line", { x1: line1.a.x, y1: line1.a.y, x2: line1.b.x, y2: line1.b.y, class: cls }));
-    this.group.appendChild(el("line", { x1: line2.a.x, y1: line2.a.y, x2: line2.b.x, y2: line2.b.y, class: cls }));
-    this.group.appendChild(el("line", { x1: transStart.x, y1: transStart.y, x2: transEnd.x, y2: transEnd.y, class: cls }));
+    geo.transversals.forEach((tr, j) => {
+      const valid = tr.intersections.filter(Boolean);
+      if (valid.length === 0) return;
+      const projections = valid.map((p) => (p.x - tr.T0.x) * tr.transDir.x + (p.y - tr.T0.y) * tr.transDir.y);
+      const minT = Math.min(...projections) - 45;
+      const maxT = Math.max(...projections) + 45;
+      const start = { x: tr.T0.x + tr.transDir.x * minT, y: tr.T0.y + tr.transDir.y * minT };
+      const end = { x: tr.T0.x + tr.transDir.x * maxT, y: tr.T0.y + tr.transDir.y * maxT };
+      this.group.appendChild(this.hitLine(start, end));
+      this.group.appendChild(el("line", { x1: start.x, y1: start.y, x2: end.x, y2: end.y, class: cls }));
 
-    this.group.appendChild(this.chevron(geo.line1Center, geo.lineDir));
-    this.group.appendChild(this.chevron(geo.line2Center, geo.lineDir));
+      tr.intersections.forEach((pt, k) => {
+        if (!pt) return;
+        this.group.appendChild(this.renderCrossing(pt, geo.lineDirRad, tr.transDirRad, tr.relAngleDeg, j, k));
+      });
 
-    const lineDirAngleRad = Math.atan2(geo.lineDir.y, geo.lineDir.x);
-    const transDirAngleRad = Math.atan2(geo.transDir.y, geo.transDir.x);
-    this.group.appendChild(this.crossingAngles(geo.T1, lineDirAngleRad, transDirAngleRad, "T1"));
-    this.group.appendChild(this.crossingAngles(geo.T2, lineDirAngleRad, transDirAngleRad, "T2"));
+      // drag handle at the far end of the transversal to steer its angle interactively
+      const handleDist = maxT + 40;
+      const handlePos = { x: tr.T0.x + tr.transDir.x * handleDist, y: tr.T0.y + tr.transDir.y * handleDist };
+      const handle = el("circle", { cx: handlePos.x, cy: handlePos.y, r: 6, class: "drag-handle" });
+      handle.addEventListener("pointerdown", (e) => this.onAnglePointerDown(e, j));
+      this.group.appendChild(handle);
+    });
 
-    // drag handle at the far end of the transversal to steer relAngle interactively
-    const handleDist = Math.hypot(geo.T2.x - geo.T1.x, geo.T2.y - geo.T1.y) + 55;
-    const handlePos = {
-      x: geo.T1.x + geo.transDir.x * handleDist,
-      y: geo.T1.y + geo.transDir.y * handleDist,
-    };
-    const handle = el("circle", { cx: handlePos.x, cy: handlePos.y, r: 6, class: "drag-handle" });
-    handle.addEventListener("pointerdown", (e) => this.onAnglePointerDown(e, geo.T1));
-    this.group.appendChild(handle);
-
-    // rotate handle: drag to spin both parallel lines (and the transversal) together
+    // rotate handle: drag to spin every line (and every transversal with them)
     const rotDist = this.halfLineLen + 30;
-    const rotPos = { x: geo.line1Center.x + geo.lineDir.x * rotDist, y: geo.line1Center.y + geo.lineDir.y * rotDist };
+    const rotPos = { x: this.center.x + geo.lineDir.x * rotDist, y: this.center.y + geo.lineDir.y * rotDist };
     this.group.appendChild(
-      el("line", { x1: geo.line1Center.x, y1: geo.line1Center.y, x2: rotPos.x, y2: rotPos.y, class: "rotate-handle-line" })
+      el("line", { x1: this.center.x, y1: this.center.y, x2: rotPos.x, y2: rotPos.y, class: "rotate-handle-line" })
     );
     const rotHandle = el("circle", { cx: rotPos.x, cy: rotPos.y, r: 6, class: "rotate-handle" });
     rotHandle.addEventListener("pointerdown", (e) => this.onRotatePointerDown(e));
@@ -226,7 +262,7 @@ export class ParallelLines {
   // dirs[i] is always strictly increasing (lineDir < transDir < lineDir+pi < transDir+pi)
   // because relAngleDeg is clamped to (5, 175), so slot index -> physical angle is stable
   // across every geometry change -- no re-sorting, so a label override never jumps position.
-  crossingAngles(point, lineDirRad, transDirRad, slotPrefix) {
+  renderCrossing(point, lineDirRad, transDirRad, relAngleDeg, transIdx, lineIdx) {
     const dirs = [lineDirRad, transDirRad, lineDirRad + Math.PI, transDirRad + Math.PI];
     const g = el("g");
     const r = 18;
@@ -238,7 +274,7 @@ export class ParallelLines {
       const end = { x: point.x + r * Math.cos(a2), y: point.y + r * Math.sin(a2) };
       const largeArc = sweepRad > Math.PI ? 1 : 0;
       const deg = round1((sweepRad * 180) / Math.PI);
-      const key = `disp-${slotPrefix}-${i}`;
+      const key = `disp-T${transIdx}-L${lineIdx}-${i}`;
       const hidden = this.angleOverrides[key] === "";
 
       if (!hidden) {
@@ -296,17 +332,18 @@ export class ParallelLines {
     window.addEventListener("pointerup", onUp);
   }
 
-  onAnglePointerDown(e, pivot) {
+  onAnglePointerDown(e, transIdx) {
     e.stopPropagation();
     this.select();
     const svg = this.group.ownerSVGElement;
+    const pivot = this.geometry().transversals[transIdx].T0;
     const onMove = (ev) => {
       const cur = toSvgPoint(svg, ev.clientX, ev.clientY);
       const absDeg = (Math.atan2(cur.y - pivot.y, cur.x - pivot.x) * 180) / Math.PI;
       let rel = absDeg - this.lineAngleDeg;
       rel = ((rel % 360) + 360) % 360;
       if (rel > 180) rel = 360 - rel;
-      this.relAngleDeg = clamp(rel, 5, 175);
+      this.transversals[transIdx].relAngleDeg = clamp(rel, 5, 175);
       this.render();
     };
     const onUp = () => {
@@ -329,7 +366,7 @@ export class ParallelLines {
     const onMove = (ev) => {
       const cur = toSvgPoint(svg, ev.clientX, ev.clientY);
       const curDeg = (Math.atan2(cur.y - center.y, cur.x - center.x) * 180) / Math.PI;
-      this.lineAngleDeg = ((startLineAngle + (curDeg - startDeg)) % 360 + 360) % 360;
+      this.lineAngleDeg = (((startLineAngle + (curDeg - startDeg)) % 360) + 360) % 360;
       this.render();
     };
     const onUp = () => {
