@@ -1,0 +1,287 @@
+:root {
+  --bg: #f5f6f8;
+  --panel-bg: #ffffff;
+  --border: #d7dbe0;
+  --text: #1f2430;
+  --text-muted: #6b7280;
+  --accent: #2563eb;
+  --accent-hover: #1d4ed8;
+  --danger: #dc2626;
+  --shape-stroke: #1f2430;
+  --selected: #2563eb;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  padding: 10px 16px;
+  background: var(--panel-bg);
+  border-bottom: 1px solid var(--border);
+  flex-wrap: wrap;
+}
+
+.toolbar h1 {
+  font-size: 16px;
+  font-weight: 600;
+  margin: 0;
+  margin-right: 8px;
+  white-space: nowrap;
+}
+
+.toolbar-group {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+button {
+  font: inherit;
+  font-size: 13px;
+  padding: 7px 12px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--panel-bg);
+  color: var(--text);
+  cursor: pointer;
+}
+
+button:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+button:disabled {
+  color: #b0b4bb;
+  cursor: not-allowed;
+}
+
+button.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: white;
+}
+button.primary:hover:not(:disabled) {
+  background: var(--accent-hover);
+}
+
+button.danger-btn:hover:not(:disabled) {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+.checkbox-label {
+  font-size: 13px;
+  color: var(--text-muted);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.workspace-area {
+  flex: 1;
+  display: flex;
+  min-height: 0;
+}
+
+.canvas-wrap {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: auto;
+  padding: 16px;
+}
+
+#canvas {
+  background: #ffffff;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  width: 100%;
+  height: 100%;
+  max-width: 1200px;
+  max-height: 840px;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.06);
+}
+
+.sidebar {
+  width: 300px;
+  flex-shrink: 0;
+  background: var(--panel-bg);
+  border-left: 1px solid var(--border);
+  padding: 16px;
+  overflow-y: auto;
+}
+
+.sidebar h2 {
+  font-size: 14px;
+  margin: 0 0 12px 0;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+}
+
+.hint {
+  font-size: 13px;
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+
+.field-group {
+  margin-bottom: 18px;
+}
+
+.field-group h3 {
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--text-muted);
+  margin: 0 0 8px 0;
+}
+
+.field-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.field-row label {
+  font-size: 13px;
+  width: 78px;
+  flex-shrink: 0;
+  color: var(--text);
+}
+
+.field-row input[type="number"],
+.field-row input[type="text"] {
+  flex: 1;
+  min-width: 0;
+  padding: 5px 7px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  font: inherit;
+  font-size: 13px;
+}
+
+.field-row input[type="range"] {
+  flex: 1;
+}
+
+.field-row .unit {
+  font-size: 12px;
+  color: var(--text-muted);
+  width: 20px;
+}
+
+.scale-readout {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  font-size: 13px;
+}
+
+/* SVG shape styling */
+.shape-poly {
+  fill: rgba(37, 99, 235, 0.06);
+  stroke: var(--shape-stroke);
+  stroke-width: 2;
+}
+
+.shape-poly.selected {
+  stroke: var(--selected);
+  fill: rgba(37, 99, 235, 0.12);
+}
+
+.shape-line {
+  stroke: var(--shape-stroke);
+  stroke-width: 2;
+}
+
+.shape-line.selected {
+  stroke: var(--selected);
+}
+
+.vertex-handle {
+  fill: #ffffff;
+  stroke: var(--shape-stroke);
+  stroke-width: 1.5;
+  cursor: grab;
+}
+.vertex-handle:hover {
+  fill: var(--accent);
+}
+.vertex-handle.dragging {
+  cursor: grabbing;
+}
+
+.drag-handle {
+  fill: var(--accent);
+  stroke: white;
+  stroke-width: 1.5;
+  cursor: grab;
+  opacity: 0.85;
+}
+
+.vertex-label {
+  font-size: 15px;
+  font-weight: 600;
+  fill: var(--text);
+  user-select: none;
+}
+
+.side-label, .angle-label {
+  font-size: 13px;
+  fill: #374151;
+  user-select: none;
+  cursor: text;
+}
+
+.side-label:hover, .angle-label:hover {
+  fill: var(--accent);
+}
+
+.angle-arc {
+  fill: none;
+  stroke: #d97706;
+  stroke-width: 1.5;
+}
+
+.right-angle-mark {
+  fill: none;
+  stroke: #d97706;
+  stroke-width: 1.5;
+}
+
+.tick-mark {
+  stroke: var(--shape-stroke);
+  stroke-width: 1.5;
+}
+
+.parallel-chevron {
+  stroke: var(--shape-stroke);
+  stroke-width: 1.5;
+  fill: none;
+}
+
+.label-edit-input {
+  position: absolute;
+  z-index: 10;
+  font: inherit;
+  font-size: 13px;
+  padding: 2px 4px;
+  border: 1px solid var(--accent);
+  border-radius: 3px;
+  width: 60px;
+}

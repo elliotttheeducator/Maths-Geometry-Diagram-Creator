@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Maths Geometry Diagram Creator</title>
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header class="toolbar">
+    <h1>Geometry Diagram Creator</h1>
+    <div class="toolbar-group">
+      <button id="add-triangle">+ Triangle</button>
+      <button id="add-parallel">+ Parallel Lines</button>
+      <button id="duplicate-scaled" disabled>Duplicate (scaled)</button>
+      <button id="delete-shape" disabled>Delete</button>
+    </div>
+    <div class="toolbar-group">
+      <label class="checkbox-label"><input type="checkbox" id="toggle-grid" /> Grid</label>
+      <button id="export-svg">Export SVG</button>
+      <button id="export-png">Export PNG</button>
+    </div>
+  </header>
+
+  <main class="workspace-area">
+    <div class="canvas-wrap">
+      <svg id="canvas" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 700">
+        <defs>
+          <pattern id="grid-pattern" width="25" height="25" patternUnits="userSpaceOnUse">
+            <path d="M 25 0 L 0 0 0 25" fill="none" stroke="#e2e5ea" stroke-width="1"/>
+          </pattern>
+        </defs>
+        <rect id="grid-bg" width="1000" height="700" fill="url(#grid-pattern)" style="display:none" />
+        <g id="shapes-layer"></g>
+      </svg>
+    </div>
+    <aside class="sidebar" id="sidebar">
+      <h2>Properties</h2>
+      <div id="sidebar-content" class="sidebar-content">
+        <p class="hint">Select a shape to edit its exact angles and side lengths, or drag its points directly on the canvas.</p>
+      </div>
+    </aside>
+  </main>
+
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>
