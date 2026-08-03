@@ -20,6 +20,50 @@ export function clear(node) {
   while (node.firstChild) node.removeChild(node.firstChild);
 }
 
+// Shared rendering for any angle/side label that can be shown (with a small "x" to
+// remove it), custom-overridden (e.g. "x" for an unknown), or hidden (shown as a
+// small "+" that restores it). Used by every shape so labels behave consistently.
+export function renderRemovableLabel({ x, y, value, hidden, cssClass, onRemove, onRestore, onDoubleClick }) {
+  const g = el("g", { class: "removable-label" });
+  if (hidden) {
+    const plus = text("+", {
+      x,
+      y,
+      class: "label-plus",
+      "text-anchor": "middle",
+      "dominant-baseline": "middle",
+    });
+    plus.addEventListener("pointerdown", (e) => e.stopPropagation());
+    plus.addEventListener("click", (e) => {
+      e.stopPropagation();
+      onRestore(e);
+    });
+    g.appendChild(plus);
+    return g;
+  }
+
+  const t = text(value, { x, y, class: cssClass, "text-anchor": "middle", "dominant-baseline": "middle" });
+  t.addEventListener("pointerdown", (e) => e.stopPropagation());
+  if (onDoubleClick) t.addEventListener("dblclick", onDoubleClick);
+  g.appendChild(t);
+
+  const cross = text("×", {
+    x: x + 13,
+    y: y - 11,
+    class: "label-remove",
+    "text-anchor": "middle",
+    "dominant-baseline": "middle",
+  });
+  cross.addEventListener("pointerdown", (e) => e.stopPropagation());
+  cross.addEventListener("click", (e) => {
+    e.stopPropagation();
+    onRemove(e);
+  });
+  g.appendChild(cross);
+
+  return g;
+}
+
 // Convert a client-space (mouse/pointer) coordinate into the SVG's user-space
 // coordinate system, accounting for the viewBox scaling.
 export function toSvgPoint(svgRoot, clientX, clientY) {

@@ -10,7 +10,18 @@ import {
   PX_PER_UNIT,
   clamp,
 } from "../geometry.js";
-import { el, text, clear, toSvgPoint } from "../svgUtil.js";
+import { el, text, clear, toSvgPoint, renderRemovableLabel } from "../svgUtil.js";
+
+// A field value is "numeric" (undefined override -> shows the computed geometry),
+// a custom label string (e.g. "x°" for an unknown -- geometry is left untouched), or
+// "" (hidden -- shows a small + to restore). Only a fully-numeric typed value ever
+// changes the actual geometry; anything else is display-only.
+function parseFieldInput(raw) {
+  const str = String(raw).trim();
+  if (str === "") return { hidden: true };
+  const isNumeric = /^-?\d*\.?\d+$/.test(str);
+  return isNumeric ? { numeric: Number(str) } : { label: str };
+}
 
 const RIGHT_ANGLE_TOLERANCE = 0.5;
 
@@ -31,6 +42,8 @@ export class Triangle {
       { x: 380, y: 260 },
     ];
     this.labels = labels;
+    this.angleOverrides = [undefined, undefined, undefined];
+    this.sideOverrides = [undefined, undefined, undefined];
     this.selected = false;
     this.group = null;
     this.controller = null;
@@ -113,7 +126,7 @@ export class Triangle {
         group: "Angles",
         label: `∠${this.labels[i]}`,
         kind: "angle",
-        value: round1(angles[i]),
+        value: this.angleOverrides[i] !== undefined ? this.angleOverrides[i] : round1(angles[i]),
       });
     }
     for (let i = 0; i < 3; i++) {
@@ -122,7 +135,7 @@ export class Triangle {
         group: "Side lengths",
         label: sideNames[i],
         kind: "length",
-        value: round1(sides[i] / PX_PER_UNIT),
+        value: this.sideOverrides[i] !== undefined ? this.sideOverrides[i] : round1(sides[i] / PX_PER_UNIT),
       });
     }
     for (let i = 0; i < 3; i++) {
@@ -153,9 +166,24 @@ export class Triangle {
     }
     const [kind, idxStr] = key.split("-");
     const idx = Number(idxStr);
-    if (kind === "angle") this.setAngle(idx, Number(value));
-    else if (kind === "side") this.setSideLength(idx, Number(value));
-    else if (kind === "label") this.setLabel(idx, String(value));
+    if (kind === "label") {
+      this.setLabel(idx, String(value));
+      return;
+    }
+    if (kind !== "angle" && kind !== "side") return;
+    const overrides = kind === "angle" ? this.angleOverrides : this.sideOverrides;
+    const parsed = parseFieldInput(value);
+    if (parsed.hidden) {
+      overrides[idx] = "";
+      this.notifyChange();
+    } else if (parsed.label !== undefined) {
+      overrides[idx] = parsed.label;
+      this.notifyChange();
+    } else {
+      overrides[idx] = undefined;
+      if (kind === "angle") this.setAngle(idx, parsed.numeric);
+      else this.setSideLength(idx, parsed.numeric);
+    }
   }
 
   // --- cloning for scale-factor duplication -----------------------------
@@ -227,6 +255,8 @@ export class Triangle {
       this.group.appendChild(this.renderVertexLabel(i, centroid));
       this.group.appendChild(this.renderVertexHandle(i));
     }
+
+    this.group.appendChild(this.renderRotateHandle(centroid));
   }
 
   renderAngleMark(i, angleDeg) {
@@ -234,9 +264,29 @@ export class Triangle {
     const F = this.points[(i + 2) % 3];
     const R = this.points[(i + 1) % 3];
     const isRight = Math.abs(angleDeg - 90) < RIGHT_ANGLE_TOLERANCE;
+    const hidden = this.angleOverrides[i] === "";
 
     const dirF = Math.atan2(F.y - V.y, F.x - V.x);
     const dirR = Math.atan2(R.y - V.y, R.x - V.x);
+    const r = 22;
+    let diff = ((dirR - dirF + Math.PI * 3) % (Math.PI * 2)) - Math.PI;
+    const bisector = dirF + diff / 2;
+    const labelR = r + 16;
+    const lp = { x: V.x + labelR * Math.cos(bisector), y: V.y + labelR * Math.sin(bisector) };
+
+    const group = el("g");
+
+    if (hidden) {
+      group.appendChild(
+        renderRemovableLabel({
+          x: lp.x,
+          y: lp.y,
+          hidden: true,
+          onRestore: (e) => this.startInlineEdit(e, `angle-${i}`, round1(angleDeg)),
+        })
+      );
+      return group;
+    }
 
     if (isRight) {
       const size = 14;
@@ -245,38 +295,37 @@ export class Triangle {
       const p1 = { x: V.x + uF.x * size, y: V.y + uF.y * size };
       const p2 = { x: V.x + uF.x * size + uR.x * size, y: V.y + uF.y * size + uR.y * size };
       const p3 = { x: V.x + uR.x * size, y: V.y + uR.y * size };
-      return el("path", {
-        d: `M ${p1.x} ${p1.y} L ${p2.x} ${p2.y} L ${p3.x} ${p3.y}`,
-        class: "right-angle-mark",
-      });
+      group.appendChild(
+        el("path", {
+          d: `M ${p1.x} ${p1.y} L ${p2.x} ${p2.y} L ${p3.x} ${p3.y}`,
+          class: "right-angle-mark",
+        })
+      );
+      return group;
     }
 
-    const r = 22;
-    let diff = ((dirR - dirF + Math.PI * 3) % (Math.PI * 2)) - Math.PI;
     const sweepFlag = diff > 0 ? 1 : 0;
     const start = { x: V.x + r * Math.cos(dirF), y: V.y + r * Math.sin(dirF) };
     const end = { x: V.x + r * Math.cos(dirR), y: V.y + r * Math.sin(dirR) };
-    const path = el("path", {
-      d: `M ${start.x} ${start.y} A ${r} ${r} 0 0 ${sweepFlag} ${end.x} ${end.y}`,
-      class: "angle-arc",
-    });
-
-    const bisector = dirF + diff / 2;
-    const labelR = r + 16;
-    const lp = { x: V.x + labelR * Math.cos(bisector), y: V.y + labelR * Math.sin(bisector) };
-    const group = el("g");
-    group.appendChild(path);
     group.appendChild(
-      text(`${round1(angleDeg)}°`, {
-        x: lp.x,
-        y: lp.y,
-        class: "angle-label",
-        "text-anchor": "middle",
-        "dominant-baseline": "middle",
+      el("path", {
+        d: `M ${start.x} ${start.y} A ${r} ${r} 0 0 ${sweepFlag} ${end.x} ${end.y}`,
+        class: "angle-arc",
       })
     );
-    group.lastChild.addEventListener("pointerdown", (e) => e.stopPropagation());
-    group.lastChild.addEventListener("dblclick", (e) => this.startInlineEdit(e, `angle-${i}`, angleDeg));
+
+    const displayValue = this.angleOverrides[i] !== undefined ? this.angleOverrides[i] : `${round1(angleDeg)}°`;
+    group.appendChild(
+      renderRemovableLabel({
+        x: lp.x,
+        y: lp.y,
+        value: displayValue,
+        hidden: false,
+        cssClass: "angle-label",
+        onRemove: () => this.setField(`angle-${i}`, ""),
+        onDoubleClick: (e) => this.startInlineEdit(e, `angle-${i}`, displayValue),
+      })
+    );
     return group;
   }
 
@@ -293,17 +342,41 @@ export class Triangle {
       ny = -ny;
     }
     const offset = 16;
+    const hidden = this.sideOverrides[i] === "";
     const lengthUnits = round1(dist(from, to) / PX_PER_UNIT);
-    const t = text(lengthUnits, {
-      x: mid.x + nx * offset,
-      y: mid.y + ny * offset,
-      class: "side-label",
-      "text-anchor": "middle",
-      "dominant-baseline": "middle",
+    const displayValue = this.sideOverrides[i] !== undefined ? this.sideOverrides[i] : lengthUnits;
+    const pos = { x: mid.x + nx * offset, y: mid.y + ny * offset };
+
+    return renderRemovableLabel({
+      x: pos.x,
+      y: pos.y,
+      value: displayValue,
+      hidden,
+      cssClass: "side-label",
+      onRemove: () => this.setField(`side-${i}`, ""),
+      onRestore: (e) => this.startInlineEdit(e, `side-${i}`, lengthUnits),
+      onDoubleClick: (e) => this.startInlineEdit(e, `side-${i}`, displayValue),
     });
-    t.addEventListener("pointerdown", (e) => e.stopPropagation());
-    t.addEventListener("dblclick", (e) => this.startInlineEdit(e, `side-${i}`, lengthUnits));
-    return t;
+  }
+
+  renderRotateHandle(centroid) {
+    const maxR = Math.max(...this.points.map((p) => dist(p, centroid)));
+    const handleR = maxR + 32;
+    const pos = { x: centroid.x, y: centroid.y - handleR };
+    const g = el("g");
+    g.appendChild(
+      el("line", {
+        x1: centroid.x,
+        y1: centroid.y,
+        x2: pos.x,
+        y2: pos.y,
+        class: "rotate-handle-line",
+      })
+    );
+    const handle = el("circle", { cx: pos.x, cy: pos.y, r: 6, class: "rotate-handle" });
+    handle.addEventListener("pointerdown", (e) => this.onRotatePointerDown(e, centroid));
+    g.appendChild(handle);
+    return g;
   }
 
   renderVertexLabel(i, centroid) {
@@ -360,6 +433,29 @@ export class Triangle {
     const onMove = (ev) => {
       const cur = toSvgPoint(svg, ev.clientX, ev.clientY);
       this.points[i] = cur;
+      this.render();
+    };
+    const onUp = () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      if (this.controller?.onChange) this.controller.onChange(this);
+    };
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+  }
+
+  onRotatePointerDown(e, centroid) {
+    e.stopPropagation();
+    this.select();
+    const svg = this.group.ownerSVGElement;
+    const startPoints = this.points.map((p) => ({ ...p }));
+    const startMouse = toSvgPoint(svg, e.clientX, e.clientY);
+    const startDeg = (Math.atan2(startMouse.y - centroid.y, startMouse.x - centroid.x) * 180) / Math.PI;
+    const onMove = (ev) => {
+      const cur = toSvgPoint(svg, ev.clientX, ev.clientY);
+      const curDeg = (Math.atan2(cur.y - centroid.y, cur.x - centroid.x) * 180) / Math.PI;
+      const delta = curDeg - startDeg;
+      this.points = startPoints.map((p) => rotatePoint(p, centroid, delta));
       this.render();
     };
     const onUp = () => {

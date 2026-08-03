@@ -275,6 +275,42 @@ button.danger-btn:hover:not(:disabled) {
   fill: none;
 }
 
+.label-remove {
+  font-size: 12px;
+  fill: #9ca3af;
+  cursor: pointer;
+  user-select: none;
+}
+.label-remove:hover {
+  fill: var(--danger);
+}
+
+.label-plus {
+  font-size: 15px;
+  font-weight: 700;
+  fill: #9ca3af;
+  cursor: pointer;
+  user-select: none;
+}
+.label-plus:hover {
+  fill: var(--accent);
+}
+
+.rotate-handle-line {
+  stroke: #9ca3af;
+  stroke-width: 1.5;
+  stroke-dasharray: 3 3;
+}
+.rotate-handle {
+  fill: #ffffff;
+  stroke: var(--accent);
+  stroke-width: 1.5;
+  cursor: grab;
+}
+.rotate-handle:hover {
+  fill: var(--accent);
+}
+
 .label-edit-input {
   position: absolute;
   z-index: 10;

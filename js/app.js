@@ -71,12 +71,12 @@ svg.addEventListener("pointerdown", (e) => {
 
 addTriangleBtn.addEventListener("click", () => {
   spawnOffset += 1;
-  const o = ((spawnOffset - 1) % 4) * 30;
+  const o = ((spawnOffset - 1) % 4) * 30 - 45;
   const t = new Triangle({
     points: [
-      { x: 150 + o, y: 480 + o },
-      { x: 370 + o, y: 480 + o },
-      { x: 230 + o, y: 260 + o },
+      { x: 360 + o, y: 430 + o },
+      { x: 640 + o, y: 430 + o },
+      { x: 500 + o, y: 190 + o },
     ],
   });
   addShape(t);
@@ -84,8 +84,8 @@ addTriangleBtn.addEventListener("click", () => {
 
 addParallelBtn.addEventListener("click", () => {
   spawnOffset += 1;
-  const o = ((spawnOffset - 1) % 4) * 25;
-  const p = new ParallelLines({ center: { x: 760 + o, y: 350 + o } });
+  const o = ((spawnOffset - 1) % 4) * 25 - 37;
+  const p = new ParallelLines({ center: { x: 500 + o, y: 350 + o } });
   addShape(p);
 });
 
@@ -134,19 +134,18 @@ function closeInlineEditor() {
 function openInlineEditor(shape, fieldKey, currentValue, evt) {
   closeInlineEditor();
   const input = document.createElement("input");
-  input.type = "number";
-  input.step = "0.1";
+  input.type = "text";
   input.value = currentValue;
   input.className = "label-edit-input";
   input.style.left = `${evt.clientX}px`;
   input.style.top = `${evt.clientY}px`;
+  input.placeholder = "value, label, or blank to hide";
 
   let committed = false;
   const commit = () => {
     if (committed) return;
     committed = true;
-    const val = Number(input.value);
-    if (!Number.isNaN(val)) shape.setField(fieldKey, val);
+    shape.setField(fieldKey, input.value);
     closeInlineEditor();
     refreshSidebar();
   };
@@ -166,7 +165,4 @@ function openInlineEditor(shape, fieldKey, currentValue, evt) {
   input.select();
 }
 
-// seed the canvas with one example so a first-time user sees something immediately
-addTriangleBtn.click();
-addParallelBtn.click();
-deselectAll();
+refreshSidebar();

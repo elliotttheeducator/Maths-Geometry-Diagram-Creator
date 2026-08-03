@@ -15,22 +15,56 @@ text { font-family: -apple-system, "Segoe UI", Helvetica, Arial, sans-serif; }
 .parallel-chevron { stroke: #1f2430; stroke-width: 1.5; fill: none; }
 `;
 
+const CROP_PADDING = 24;
+const INTERACTIVE_ONLY_SELECTOR = ".vertex-handle, .drag-handle, .rotate-handle, .rotate-handle-line, .label-remove, .label-plus";
+
+// Measure the actual drawn content (not the fixed 1000x700 workspace) so the export
+// isn't full of blank canvas. Must run on an SVG still attached to the document --
+// getBBox() on a fully detached node throws/returns garbage in most browsers -- so
+// this temporarily mounts an offscreen copy purely to read geometry, then discards it.
+function measureContentBBox(svgEl) {
+  const probe = svgEl.cloneNode(true);
+  probe.style.position = "fixed";
+  probe.style.left = "-99999px";
+  probe.style.top = "0";
+  document.body.appendChild(probe);
+  const layer = probe.querySelector("#shapes-layer");
+  let box = null;
+  if (layer && layer.childNodes.length) {
+    const b = layer.getBBox();
+    if (b.width > 0 && b.height > 0) box = b;
+  }
+  document.body.removeChild(probe);
+  return box;
+}
+
 function prepareCleanSvg(svgEl) {
   const clone = svgEl.cloneNode(true);
-  clone.querySelectorAll(".vertex-handle, .drag-handle").forEach((n) => n.remove());
+  clone.querySelectorAll(INTERACTIVE_ONLY_SELECTOR).forEach((n) => n.remove());
   clone.querySelectorAll(".selected").forEach((n) => n.classList.remove("selected"));
   const gridBg = clone.querySelector("#grid-bg");
   if (gridBg) gridBg.remove();
+
+  const box = measureContentBBox(clone);
+  const [origX, origY, origW, origH] = clone.getAttribute("viewBox").split(" ").map(Number);
+  const vbX = box ? box.x - CROP_PADDING : origX;
+  const vbY = box ? box.y - CROP_PADDING : origY;
+  const vbW = box ? box.width + CROP_PADDING * 2 : origW;
+  const vbH = box ? box.height + CROP_PADDING * 2 : origH;
+
+  clone.setAttribute("viewBox", `${vbX} ${vbY} ${vbW} ${vbH}`);
+  clone.setAttribute("width", vbW);
+  clone.setAttribute("height", vbH);
 
   const style = document.createElementNS("http://www.w3.org/2000/svg", "style");
   style.textContent = EXPORT_STYLE;
   clone.insertBefore(style, clone.firstChild);
 
   const bg = document.createElementNS("http://www.w3.org/2000/svg", "rect");
-  bg.setAttribute("x", "0");
-  bg.setAttribute("y", "0");
-  bg.setAttribute("width", clone.getAttribute("viewBox").split(" ")[2]);
-  bg.setAttribute("height", clone.getAttribute("viewBox").split(" ")[3]);
+  bg.setAttribute("x", vbX);
+  bg.setAttribute("y", vbY);
+  bg.setAttribute("width", vbW);
+  bg.setAttribute("height", vbH);
   bg.setAttribute("fill", "#ffffff");
   clone.insertBefore(bg, clone.firstChild);
 

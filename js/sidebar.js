@@ -78,11 +78,10 @@ function renderField(shape, field) {
   }
 
   const input = document.createElement("input");
-  input.type = "number";
-  input.min = meta.min;
-  input.max = meta.max;
-  input.step = meta.step;
+  input.type = "text";
   input.value = field.value;
+  input.placeholder = "blank to hide";
+  input.title = "Type a number to set it exactly, text (e.g. x) to label it as an unknown, or leave blank to hide it.";
   input.addEventListener("change", () => {
     shape.setField(field.key, input.value);
   });
