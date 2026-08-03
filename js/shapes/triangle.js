@@ -62,6 +62,14 @@ export class Triangle {
     // parallel-lines crossing angles -- there's no independent way to set it.
     this.exteriorExtended = [false, false, false];
     this.exteriorOverrides = [undefined, undefined, undefined];
+    // Internal segment parallel to one side: apex is the vertex NOT on that side;
+    // the segment connects points at the same fraction t (0-1) along the two sides
+    // touching the apex, which by the basic proportionality theorem is always
+    // exactly parallel to the third (opposite) side, for any t. Covers both a
+    // midsegment-style triangle and a nested similar right-triangle construction.
+    this.cevian = { apex: null, t: 0.5 };
+    this.cevianLengthOverride = undefined;
+    this.cevianPointLabels = ["D", "E"];
     this.selected = false;
     this.group = null;
     this.controller = null;
@@ -273,6 +281,54 @@ export class Triangle {
         });
       }
     }
+    fields.push({
+      key: "cevian-toggle",
+      group: "Parallel segment",
+      label: "Show",
+      kind: "toggle",
+      value: this.cevian.apex != null,
+    });
+    if (this.cevian.apex != null) {
+      for (let i = 0; i < 3; i++) {
+        fields.push({
+          key: `cevian-apex-${i}`,
+          group: "Parallel segment",
+          label: `From ${this.labels[i]}`,
+          kind: "toggle",
+          value: this.cevian.apex === i,
+        });
+      }
+      fields.push({
+        key: "cevian-t",
+        group: "Parallel segment",
+        label: "Position",
+        kind: "ratio",
+        value: this.cevian.t,
+      });
+      const cp = this.cevianPoints();
+      const lengthUnits = round1(dist(cp.P1, cp.P2) / PX_PER_UNIT);
+      fields.push({
+        key: "cevian-length",
+        group: "Parallel segment",
+        label: "Length",
+        kind: "length",
+        value: this.cevianLengthOverride !== undefined ? this.cevianLengthOverride : lengthUnits,
+      });
+      fields.push({
+        key: "cevian-label-0",
+        group: "Parallel segment",
+        label: "Point 1 label",
+        kind: "text",
+        value: this.cevianPointLabels[0],
+      });
+      fields.push({
+        key: "cevian-label-1",
+        group: "Parallel segment",
+        label: "Point 2 label",
+        kind: "text",
+        value: this.cevianPointLabels[1],
+      });
+    }
     if (this._scaleBasePoints) {
       fields.unshift({
         key: "scale-factor",
@@ -305,6 +361,35 @@ export class Triangle {
       const extIdx = Number(key.slice(4));
       const str = String(value).trim();
       this.exteriorOverrides[extIdx] = str === "" ? "" : str;
+      this.notifyChange();
+      return;
+    }
+    if (key === "cevian-toggle") {
+      this.setCevianApex(value ? (this.cevian.apex == null ? 2 : this.cevian.apex) : null);
+      return;
+    }
+    if (key.startsWith("cevian-apex-")) {
+      this.setCevianApex(Number(key.slice(12)));
+      return;
+    }
+    if (key === "cevian-t") {
+      this.setCevianT(Number(value));
+      return;
+    }
+    if (key === "cevian-length") {
+      const parsed = parseFieldInput(value);
+      if (parsed.numeric !== undefined) {
+        this.cevianLengthOverride = undefined;
+        this.setCevianLength(parsed.numeric);
+      } else {
+        this.cevianLengthOverride = parsed.hidden ? "" : parsed.label;
+        this.notifyChange();
+      }
+      return;
+    }
+    if (key.startsWith("cevian-label-")) {
+      const li = Number(key.slice(13));
+      this.cevianPointLabels[li] = String(value).slice(0, 4) || this.cevianPointLabels[li];
       this.notifyChange();
       return;
     }
@@ -354,6 +439,46 @@ export class Triangle {
     this.notifyChange();
   }
 
+  // --- internal parallel segment (cevian) --------------------------------
+
+  cevianPoints() {
+    if (this.cevian.apex == null) return null;
+    const apex = this.cevian.apex;
+    const n1 = (apex + 1) % 3;
+    const n2 = (apex + 2) % 3;
+    const A = this.points[apex];
+    const N1 = this.points[n1];
+    const N2 = this.points[n2];
+    const t = this.cevian.t;
+    return {
+      apex,
+      farSideIndex: n1, // side n1 connects vertex n1 & n2 -- the side this segment is parallel to
+      P1: { x: A.x + t * (N1.x - A.x), y: A.y + t * (N1.y - A.y) },
+      P2: { x: A.x + t * (N2.x - A.x), y: A.y + t * (N2.y - A.y) },
+    };
+  }
+
+  setCevianApex(apex) {
+    this.cevian.apex = apex;
+    this.notifyChange();
+  }
+
+  setCevianT(t) {
+    this.cevian.t = clamp(t, 0.05, 0.95);
+    this.notifyChange();
+  }
+
+  // Solve t so the segment has the requested length (segment length = t * far side length).
+  setCevianLength(newLengthUnits) {
+    if (this.cevian.apex == null) return;
+    const cp = this.cevianPoints();
+    const farSideLenPx = dist(this.points[cp.farSideIndex], this.points[(cp.farSideIndex + 1) % 3]);
+    if (farSideLenPx < 1) return;
+    const t = (newLengthUnits * PX_PER_UNIT) / farSideLenPx;
+    this.cevian.t = clamp(t, 0.05, 0.95);
+    this.notifyChange();
+  }
+
   // --- rendering ---------------------------------------------------------
 
   mount(layer, controller) {
@@ -397,6 +522,8 @@ export class Triangle {
       const to = this.points[(i + 1) % 3];
       this.group.appendChild(this.renderSideLabel(i, from, to, centroid));
     }
+
+    if (this.cevian.apex != null) this.group.appendChild(this.renderCevian(centroid));
 
     // vertex handles + labels
     for (let i = 0; i < 3; i++) {
@@ -556,6 +683,81 @@ export class Triangle {
       onRestore: (e) => this.startInlineEdit(e, `side-${i}`, lengthUnits),
       onDoubleClick: (e) => this.startInlineEdit(e, `side-${i}`, displayValue),
     });
+  }
+
+  renderCevian(centroid) {
+    const cp = this.cevianPoints();
+    const g = el("g");
+    g.appendChild(el("line", { x1: cp.P1.x, y1: cp.P1.y, x2: cp.P2.x, y2: cp.P2.y, class: "shape-line" }));
+
+    // point labels
+    for (const [p, label] of [
+      [cp.P1, this.cevianPointLabels[0]],
+      [cp.P2, this.cevianPointLabels[1]],
+    ]) {
+      const dx = p.x - centroid.x;
+      const dy = p.y - centroid.y;
+      const len = Math.hypot(dx, dy) || 1;
+      g.appendChild(
+        text(label, {
+          x: p.x + (dx / len) * 16,
+          y: p.y + (dy / len) * 16,
+          class: "vertex-label",
+          "text-anchor": "middle",
+          "dominant-baseline": "middle",
+        })
+      );
+    }
+
+    // length label, offset away from the apex
+    const mid = midpoint(cp.P1, cp.P2);
+    const apexPt = this.points[cp.apex];
+    const away = { x: mid.x - apexPt.x, y: mid.y - apexPt.y };
+    const awayLen = Math.hypot(away.x, away.y) || 1;
+    const labelPos = { x: mid.x + (away.x / awayLen) * 16, y: mid.y + (away.y / awayLen) * 16 };
+    const hidden = this.cevianLengthOverride === "";
+    const lengthUnits = round1(dist(cp.P1, cp.P2) / PX_PER_UNIT);
+    const displayValue = this.cevianLengthOverride !== undefined ? this.cevianLengthOverride : lengthUnits;
+    g.appendChild(
+      renderRemovableLabel({
+        x: labelPos.x,
+        y: labelPos.y,
+        value: displayValue,
+        hidden,
+        cssClass: "side-label",
+        onRemove: () => this.setField("cevian-length", ""),
+        onRestore: (e) => this.startInlineEdit(e, "cevian-length", lengthUnits),
+        onDoubleClick: (e) => this.startInlineEdit(e, "cevian-length", displayValue),
+      })
+    );
+
+    // drag handle on P1 to steer t interactively
+    const handle = el("circle", { cx: cp.P1.x, cy: cp.P1.y, r: 5, class: "drag-handle" });
+    handle.addEventListener("pointerdown", (e) => this.onCevianPointerDown(e));
+    g.appendChild(handle);
+    return g;
+  }
+
+  onCevianPointerDown(e) {
+    e.stopPropagation();
+    this.select();
+    const svg = this.group.ownerSVGElement;
+    const apex = this.points[this.cevian.apex];
+    const n1 = this.points[(this.cevian.apex + 1) % 3];
+    const dirLenSq = (n1.x - apex.x) ** 2 + (n1.y - apex.y) ** 2;
+    const onMove = (ev) => {
+      const cur = toSvgPoint(svg, ev.clientX, ev.clientY);
+      const t = ((cur.x - apex.x) * (n1.x - apex.x) + (cur.y - apex.y) * (n1.y - apex.y)) / dirLenSq;
+      this.cevian.t = clamp(t, 0.05, 0.95);
+      this.render();
+    };
+    const onUp = () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      if (this.controller?.onChange) this.controller.onChange(this);
+    };
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
   }
 
   renderRotateHandle(centroid) {

@@ -1,7 +1,8 @@
 const KIND_META = {
   angle: { unit: "°", min: 1, max: 178, step: 0.5 },
   length: { unit: "u", min: 0.2, max: 40, step: 0.1 },
-  scale: { unit: "×", min: 0.2, max: 3, step: 0.05 },
+  scale: { unit: "×", min: 0.2, max: 3, step: 0.05, suffix: "×" },
+  ratio: { unit: "", min: 0.05, max: 0.95, step: 0.02, suffix: "" },
 };
 
 export function renderSidebar(container, shape) {
@@ -70,7 +71,7 @@ function renderField(shape, field) {
 
   const meta = KIND_META[field.kind] || { unit: "", min: 0, max: 100, step: 1 };
 
-  if (field.kind === "scale") {
+  if (field.kind === "scale" || field.kind === "ratio") {
     const range = document.createElement("input");
     range.type = "range";
     range.min = meta.min;
@@ -79,9 +80,9 @@ function renderField(shape, field) {
     range.value = field.value;
     const readout = document.createElement("span");
     readout.className = "scale-readout";
-    readout.textContent = `${field.value}×`;
+    readout.textContent = `${field.value}${meta.suffix}`;
     range.addEventListener("input", () => {
-      readout.textContent = `${range.value}×`;
+      readout.textContent = `${range.value}${meta.suffix}`;
       shape.setField(field.key, range.value);
     });
     row.appendChild(range);
