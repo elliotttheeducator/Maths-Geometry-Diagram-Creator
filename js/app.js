@@ -20,6 +20,76 @@ let shapes = [];
 let selectedShape = null;
 let spawnOffset = 0;
 
+// --- keep the canvas framed around whatever's actually drawn -------------
+//
+// The SVG viewBox starts at a fixed 1000x700, but shapes can be dragged, rotated,
+// or scaled well outside that box -- without this, they'd simply clip off the
+// edge. Instead the viewBox is continuously refit to the union of every shape's
+// rendered content (via a MutationObserver, so it reacts to renders regardless
+// of which shape or which kind of edit caused them).
+//
+// Refitting is skipped while a pointer is actively held down inside the SVG and
+// runs once immediately on release. Both readings inside a single drag always
+// go through toSvgPoint's live CTM, so per-frame math stays correct either way --
+// this pause is purely to avoid a live-zoom feedback loop (dragging a shape
+// outward grows the box, which changes the zoom, which changes where the same
+// mouse pixel maps to in user-space, which could nudge the shape again).
+const FIT_PADDING = 40;
+const FIT_MIN_W = 500;
+const FIT_MIN_H = 400;
+const DEFAULT_VIEWBOX = [0, 0, 1000, 700];
+let isPointerDown = false;
+let fitScheduled = false;
+
+function scheduleFit() {
+  if (isPointerDown || fitScheduled) return;
+  fitScheduled = true;
+  requestAnimationFrame(() => {
+    fitScheduled = false;
+    fitViewToContent();
+  });
+}
+
+function fitViewToContent() {
+  let box = null;
+  if (layer.childNodes.length) {
+    try {
+      box = layer.getBBox();
+    } catch {
+      box = null;
+    }
+  }
+
+  let [vbX, vbY, vbW, vbH] = DEFAULT_VIEWBOX;
+  if (box && box.width > 0 && box.height > 0) {
+    vbX = box.x - FIT_PADDING;
+    vbY = box.y - FIT_PADDING;
+    vbW = box.width + FIT_PADDING * 2;
+    vbH = box.height + FIT_PADDING * 2;
+    if (vbW < FIT_MIN_W) {
+      vbX -= (FIT_MIN_W - vbW) / 2;
+      vbW = FIT_MIN_W;
+    }
+    if (vbH < FIT_MIN_H) {
+      vbY -= (FIT_MIN_H - vbH) / 2;
+      vbH = FIT_MIN_H;
+    }
+  }
+
+  svg.setAttribute("viewBox", `${vbX} ${vbY} ${vbW} ${vbH}`);
+  gridBg.setAttribute("x", vbX);
+  gridBg.setAttribute("y", vbY);
+  gridBg.setAttribute("width", vbW);
+  gridBg.setAttribute("height", vbH);
+}
+
+new MutationObserver(scheduleFit).observe(layer, { childList: true, subtree: true, attributes: true });
+svg.addEventListener("pointerdown", () => { isPointerDown = true; }, { capture: true });
+window.addEventListener("pointerup", () => {
+  isPointerDown = false;
+  scheduleFit();
+});
+
 const controller = {
   onSelect(shape) {
     selectShape(shape);
