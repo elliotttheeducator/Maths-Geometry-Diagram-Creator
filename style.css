@@ -275,6 +275,65 @@ button.danger-btn:hover:not(:disabled) {
   fill: none;
 }
 
+.color-input {
+  width: 40px;
+  height: 28px;
+  padding: 2px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  cursor: pointer;
+}
+
+.swatch-row {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.swatch-btn {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  cursor: pointer;
+  padding: 0;
+}
+.swatch-btn.selected {
+  border: 2px solid var(--accent);
+}
+
+.segment-delete {
+  fill: #ffffff;
+  stroke: #9ca3af;
+  stroke-width: 1.5;
+  cursor: pointer;
+}
+.segment-delete:hover {
+  stroke: var(--danger);
+}
+.segment-delete-x {
+  stroke: #9ca3af;
+  stroke-width: 1.5;
+  pointer-events: none;
+}
+.segment-delete:hover + .segment-delete-x,
+.segment-delete-group:hover .segment-delete-x {
+  stroke: var(--danger);
+}
+
+.equal-length-tick {
+  stroke: var(--shape-stroke);
+  stroke-width: 1.5;
+}
+
+.new-vertex-handle {
+  fill: #ffffff;
+  stroke: var(--accent);
+  stroke-width: 1.5;
+  stroke-dasharray: 2 2;
+  cursor: grab;
+}
+
 .lock-btn {
   flex: 0 0 auto;
   padding: 2px 5px;

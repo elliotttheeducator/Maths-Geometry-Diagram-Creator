@@ -92,6 +92,27 @@ export function rayIntersection(P, dirPRad, Q, dirQRad) {
   return { x: P.x + dPx * t, y: P.y + dPy * t };
 }
 
+// Intersection of segment p1-p2 and segment p3-p4, but ONLY if it falls strictly
+// inside both segments (not at or near an endpoint) -- endpoint coincidences are
+// real shared vertices, handled separately, not "crossings".
+export function segmentIntersection(p1, p2, p3, p4) {
+  const d1x = p2.x - p1.x;
+  const d1y = p2.y - p1.y;
+  const d2x = p4.x - p3.x;
+  const d2y = p4.y - p3.y;
+  const denom = d1x * d2y - d1y * d2x;
+  if (Math.abs(denom) < 1e-9) return null;
+  const dx = p3.x - p1.x;
+  const dy = p3.y - p1.y;
+  const t = (dx * d2y - dy * d2x) / denom;
+  const s = (dx * d1y - dy * d1x) / denom;
+  const EPS = 0.02;
+  if (t > EPS && t < 1 - EPS && s > EPS && s < 1 - EPS) {
+    return { x: p1.x + d1x * t, y: p1.y + d1y * t };
+  }
+  return null;
+}
+
 export function midpoint(a, b) {
   return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
 }

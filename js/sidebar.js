@@ -5,6 +5,19 @@ const KIND_META = {
   ratio: { unit: "", min: 0.05, max: 0.95, step: 0.02, suffix: "" },
 };
 
+// Fixed pastel palette for polygon fills -- keeps the "pastel" look consistent
+// instead of a free-for-all color wheel. "none" renders as a transparent swatch.
+export const PASTEL_SWATCHES = [
+  "none",
+  "#FBE4E4",
+  "#FFF3D6",
+  "#E7F3D6",
+  "#D9F0E8",
+  "#DCE9FB",
+  "#E6E0F8",
+  "#FBE0F0",
+];
+
 export function renderSidebar(container, shape) {
   container.innerHTML = "";
   if (!shape) {
@@ -64,6 +77,32 @@ function renderField(shape, field) {
       shape.setField(field.key, input.checked);
     });
     row.appendChild(input);
+    return row;
+  }
+
+  if (field.kind === "color") {
+    const input = document.createElement("input");
+    input.type = "color";
+    input.value = field.value;
+    input.className = "color-input";
+    input.addEventListener("input", () => shape.setField(field.key, input.value));
+    row.appendChild(input);
+    return row;
+  }
+
+  if (field.kind === "swatch") {
+    const wrap = document.createElement("div");
+    wrap.className = "swatch-row";
+    for (const color of PASTEL_SWATCHES) {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "swatch-btn" + (field.value === color ? " selected" : "");
+      btn.style.background = color === "none" ? "transparent" : color;
+      btn.title = color === "none" ? "No fill" : color;
+      btn.addEventListener("click", () => shape.setField(field.key, color));
+      wrap.appendChild(btn);
+    }
+    row.appendChild(wrap);
     return row;
   }
 

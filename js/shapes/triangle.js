@@ -12,19 +12,9 @@ import {
   clamp,
 } from "../geometry.js";
 import { el, text, clear, toSvgPoint, renderRemovableLabel } from "../svgUtil.js";
+import { parseFieldInput } from "../fieldInput.js";
 
 const DEG = Math.PI / 180;
-
-// A field value is "numeric" (undefined override -> shows the computed geometry),
-// a custom label string (e.g. "x°" for an unknown -- geometry is left untouched), or
-// "" (hidden -- shows a small + to restore). Only a fully-numeric typed value ever
-// changes the actual geometry; anything else is display-only.
-function parseFieldInput(raw) {
-  const str = String(raw).trim();
-  if (str === "") return { hidden: true };
-  const isNumeric = /^-?\d*\.?\d+$/.test(str);
-  return isNumeric ? { numeric: Number(str) } : { label: str };
-}
 
 const RIGHT_ANGLE_TOLERANCE = 0.5;
 

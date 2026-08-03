@@ -13,10 +13,12 @@ text { font-family: -apple-system, "Segoe UI", Helvetica, Arial, sans-serif; }
 .angle-arc { fill: none; stroke: #d97706; stroke-width: 1.5; }
 .right-angle-mark { fill: none; stroke: #d97706; stroke-width: 1.5; }
 .parallel-chevron { stroke: #1f2430; stroke-width: 1.5; fill: none; }
+.equal-length-tick { stroke: #1f2430; stroke-width: 1.5; }
 `;
 
 const CROP_PADDING = 24;
-const INTERACTIVE_ONLY_SELECTOR = ".vertex-handle, .drag-handle, .rotate-handle, .rotate-handle-line, .label-remove, .label-plus";
+const INTERACTIVE_ONLY_SELECTOR =
+  ".vertex-handle, .drag-handle, .rotate-handle, .rotate-handle-line, .label-remove, .label-plus, .segment-delete-group, .new-vertex-handle";
 
 // Measure the actual drawn content (not the fixed 1000x700 workspace) so the export
 // isn't full of blank canvas. Must run on an SVG still attached to the document --

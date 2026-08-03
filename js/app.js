@@ -1,5 +1,6 @@
 import { Triangle } from "./shapes/triangle.js";
 import { ParallelLines } from "./shapes/parallelLines.js";
+import { LineGraph } from "./shapes/lineGraph.js";
 import { renderSidebar } from "./sidebar.js";
 import { exportSvg, exportPng } from "./export.js";
 
@@ -10,6 +11,7 @@ const gridBg = document.getElementById("grid-bg");
 
 const addTriangleBtn = document.getElementById("add-triangle");
 const addParallelBtn = document.getElementById("add-parallel");
+const addLineBtn = document.getElementById("add-line");
 const duplicateBtn = document.getElementById("duplicate-scaled");
 const deleteBtn = document.getElementById("delete-shape");
 const exportSvgBtn = document.getElementById("export-svg");
@@ -157,6 +159,19 @@ addParallelBtn.addEventListener("click", () => {
   const o = ((spawnOffset - 1) % 4) * 25 - 37;
   const p = new ParallelLines({ center: { x: 500 + o, y: 350 + o } });
   addShape(p);
+});
+
+// "+Line" adds a segment to the currently-selected line graph (so repeated
+// clicks build up one connected diagram); if nothing suitable is selected, it
+// starts a new one. Deselect first (click empty canvas) to start a separate graph.
+addLineBtn.addEventListener("click", () => {
+  if (selectedShape && selectedShape.type === "line-graph") {
+    selectedShape.addSegment();
+    return;
+  }
+  const g = new LineGraph();
+  addShape(g);
+  g.addSegment();
 });
 
 duplicateBtn.addEventListener("click", () => {
