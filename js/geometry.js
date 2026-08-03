@@ -77,6 +77,21 @@ export function pointOnRay(from, through, length) {
   return add(from, scale(dir, length));
 }
 
+// Intersection of ray from P (direction angle dirPRad) and ray from Q (direction
+// angle dirQRad). Returns null if the rays are parallel.
+export function rayIntersection(P, dirPRad, Q, dirQRad) {
+  const dPx = Math.cos(dirPRad);
+  const dPy = Math.sin(dirPRad);
+  const dQx = Math.cos(dirQRad);
+  const dQy = Math.sin(dirQRad);
+  const denom = dPx * dQy - dPy * dQx;
+  if (Math.abs(denom) < 1e-9) return null;
+  const dx = Q.x - P.x;
+  const dy = Q.y - P.y;
+  const t = (dx * dQy - dy * dQx) / denom;
+  return { x: P.x + dPx * t, y: P.y + dPy * t };
+}
+
 export function midpoint(a, b) {
   return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
 }

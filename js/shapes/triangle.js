@@ -3,6 +3,7 @@ import {
   angleAtVertex,
   signedAngleAtVertex,
   rotatePoint,
+  rayIntersection,
   pointOnRay,
   midpoint,
   round1,
@@ -11,6 +12,8 @@ import {
   clamp,
 } from "../geometry.js";
 import { el, text, clear, toSvgPoint, renderRemovableLabel } from "../svgUtil.js";
+
+const DEG = Math.PI / 180;
 
 // A field value is "numeric" (undefined override -> shows the computed geometry),
 // a custom label string (e.g. "x°" for an unknown -- geometry is left untouched), or
@@ -44,6 +47,15 @@ export class Triangle {
     this.labels = labels;
     this.angleOverrides = [undefined, undefined, undefined];
     this.sideOverrides = [undefined, undefined, undefined];
+    // A field typed in as a plain number is "locked" -- its value is protected
+    // from being silently disturbed by a *later* edit to a different field.
+    // With 2 angles locked (or 2 sides), that later edit is solved properly
+    // (ASA / SAS reconstruction) instead of the naive single-point rule, so both
+    // locked values hold simultaneously -- e.g. typing two 80s makes an isosceles
+    // triangle instead of the second edit silently changing the first.
+    this.angleLockDeg = [null, null, null];
+    this.sideLockUnits = [null, null, null];
+    this._lockOrder = []; // tokens like "angle:0", oldest first -- used to resolve 3-way conflicts
     // Exterior angle at vertex i: extends the incoming side (from the previous
     // vertex) beyond vertex i into a ray, and labels the angle between that ray
     // and the other side at i. Always display-only (180 - interior), like the
@@ -75,7 +87,9 @@ export class Triangle {
 
   // --- precise editing rules -------------------------------------------
 
-  setAngle(vertexIndex, newDeg) {
+  // The single-point fallback rule, used when fewer than 2 angles are locked (so
+  // there isn't yet a well-defined base to reconstruct from).
+  applyAngleRotation(vertexIndex, newDeg) {
     newDeg = Math.max(1, Math.min(178, newDeg));
     const prevIdx = (vertexIndex + 2) % 3;
     const nextIdx = (vertexIndex + 1) % 3;
@@ -87,17 +101,104 @@ export class Triangle {
     const newSigned = sign * newDeg;
     const delta = newSigned - signedCurrent;
     this.points[nextIdx] = rotatePoint(R, V, delta);
-    this.notifyChange();
   }
 
-  setSideLength(sideIndex, newLengthUnits) {
+  // The single-point fallback rule, used when fewer than 2 sides are locked.
+  applySideMove(sideIndex, newLengthUnits) {
     const newLenPx = Math.max(10, newLengthUnits * PX_PER_UNIT);
     const fromIdx = sideIndex;
     const toIdx = (sideIndex + 1) % 3;
     const from = this.points[fromIdx];
     const to = this.points[toIdx];
     this.points[toIdx] = pointOnRay(from, to, newLenPx);
-    this.notifyChange();
+  }
+
+  pushLockOrder(token) {
+    this._lockOrder = this._lockOrder.filter((t) => t !== token);
+    this._lockOrder.push(token);
+  }
+
+  clearAngleLock(idx) {
+    this.angleLockDeg[idx] = null;
+    this._lockOrder = this._lockOrder.filter((t) => t !== `angle:${idx}`);
+  }
+
+  clearSideLock(idx) {
+    this.sideLockUnits[idx] = null;
+    this._lockOrder = this._lockOrder.filter((t) => t !== `side:${idx}`);
+  }
+
+  lockAngle(vertexIndex, newDeg) {
+    this.angleLockDeg[vertexIndex] = clamp(newDeg, 1, 178);
+    this.pushLockOrder(`angle:${vertexIndex}`);
+
+    let lockedIdx = [0, 1, 2].filter((i) => this.angleLockDeg[i] != null);
+    if (lockedIdx.length === 3) {
+      const sum = lockedIdx.reduce((s, i) => s + this.angleLockDeg[i], 0);
+      if (Math.abs(sum - 180) > 0.05) {
+        const oldest = this._lockOrder.find((t) => t.startsWith("angle:"));
+        this.clearAngleLock(Number(oldest.split(":")[1]));
+        lockedIdx = [0, 1, 2].filter((i) => this.angleLockDeg[i] != null);
+      }
+    }
+
+    if (lockedIdx.length === 2) {
+      this.placeApexFromTwoAngles(lockedIdx[0], lockedIdx[1]);
+    } else {
+      this.applyAngleRotation(vertexIndex, newDeg);
+    }
+  }
+
+  lockSide(sideIndex, newLengthUnits) {
+    this.sideLockUnits[sideIndex] = Math.max(0.2, newLengthUnits);
+    this.pushLockOrder(`side:${sideIndex}`);
+
+    let lockedIdx = [0, 1, 2].filter((i) => this.sideLockUnits[i] != null);
+    if (lockedIdx.length === 3) {
+      const oldest = this._lockOrder.find((t) => t.startsWith("side:"));
+      this.clearSideLock(Number(oldest.split(":")[1]));
+      lockedIdx = [0, 1, 2].filter((i) => this.sideLockUnits[i] != null);
+    }
+
+    if (lockedIdx.length === 2) {
+      this.placeFarPointsFromTwoSides(lockedIdx[0], lockedIdx[1]);
+    } else {
+      this.applySideMove(sideIndex, newLengthUnits);
+    }
+  }
+
+  // Base p<->q stays exactly where it is; the apex (the third vertex) is placed at
+  // the intersection of the two rays defined by the locked angles at p and q, on
+  // whichever side the apex currently sits (so it doesn't flip the triangle over).
+  placeApexFromTwoAngles(p, q) {
+    const apex = 3 - p - q;
+    const P = this.points[p];
+    const Q = this.points[q];
+    const baseDir = Math.atan2(Q.y - P.y, Q.x - P.x);
+    const cross = (Q.x - P.x) * (this.points[apex].y - P.y) - (Q.y - P.y) * (this.points[apex].x - P.x);
+    const side = cross >= 0 ? 1 : -1;
+    const angleFromP = baseDir + side * this.angleLockDeg[p] * DEG;
+    const angleFromQ = baseDir + Math.PI - side * this.angleLockDeg[q] * DEG;
+    const newApex = rayIntersection(P, angleFromP, Q, angleFromQ);
+    if (newApex) this.points[apex] = newApex;
+  }
+
+  // The shared vertex of the two locked sides stays fixed; each side's far point is
+  // placed at the locked distance along its existing direction from that vertex.
+  placeFarPointsFromTwoSides(s1, s2) {
+    const pairs = [
+      [0, 1],
+      [1, 2],
+      [2, 0],
+    ];
+    const [a1, b1] = pairs[s1];
+    const [a2, b2] = pairs[s2];
+    const shared = [a1, b1].find((v) => v === a2 || v === b2);
+    const far1 = a1 === shared ? b1 : a1;
+    const far2 = a2 === shared ? b2 : a2;
+    const S = this.points[shared];
+    this.points[far1] = pointOnRay(S, this.points[far1], this.sideLockUnits[s1] * PX_PER_UNIT);
+    this.points[far2] = pointOnRay(S, this.points[far2], this.sideLockUnits[s2] * PX_PER_UNIT);
   }
 
   setLabel(vertexIndex, newLabel) {
@@ -130,7 +231,7 @@ export class Triangle {
       fields.push({
         key: `angle-${i}`,
         group: "Angles",
-        label: `∠${this.labels[i]}`,
+        label: `∠${this.labels[i]}${this.angleLockDeg[i] != null ? " 🔒" : ""}`,
         kind: "angle",
         value: this.angleOverrides[i] !== undefined ? this.angleOverrides[i] : round1(angles[i]),
       });
@@ -139,7 +240,7 @@ export class Triangle {
       fields.push({
         key: `side-${i}`,
         group: "Side lengths",
-        label: sideNames[i],
+        label: `${sideNames[i]}${this.sideLockUnits[i] != null ? " 🔒" : ""}`,
         kind: "length",
         value: this.sideOverrides[i] !== undefined ? this.sideOverrides[i] : round1(sides[i] / PX_PER_UNIT),
       });
@@ -212,14 +313,19 @@ export class Triangle {
     const parsed = parseFieldInput(value);
     if (parsed.hidden) {
       overrides[idx] = "";
+      if (kind === "angle") this.clearAngleLock(idx);
+      else this.clearSideLock(idx);
       this.notifyChange();
     } else if (parsed.label !== undefined) {
       overrides[idx] = parsed.label;
+      if (kind === "angle") this.clearAngleLock(idx);
+      else this.clearSideLock(idx);
       this.notifyChange();
     } else {
       overrides[idx] = undefined;
-      if (kind === "angle") this.setAngle(idx, parsed.numeric);
-      else this.setSideLength(idx, parsed.numeric);
+      if (kind === "angle") this.lockAngle(idx, parsed.numeric);
+      else this.lockSide(idx, parsed.numeric);
+      this.notifyChange();
     }
   }
 
@@ -522,6 +628,11 @@ export class Triangle {
   onVertexPointerDown(e, i) {
     e.stopPropagation();
     this.select();
+    // Dragging a vertex directly overrides any lock tied to it -- otherwise the
+    // next typed edit elsewhere would silently snap it back to the locked value.
+    this.clearAngleLock(i);
+    this.clearSideLock(i);
+    this.clearSideLock((i + 2) % 3);
     const svg = this.group.ownerSVGElement;
     const onMove = (ev) => {
       const cur = toSvgPoint(svg, ev.clientX, ev.clientY);
