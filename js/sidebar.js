@@ -58,6 +58,14 @@ function renderField(shape, field) {
     row.appendChild(lockBtn);
   }
 
+  if (field.kind === "info") {
+    const out = document.createElement("span");
+    out.className = "derived-value";
+    out.textContent = field.value;
+    row.appendChild(out);
+    return row;
+  }
+
   if (field.kind === "toggle") {
     const input = document.createElement("input");
     input.type = "checkbox";

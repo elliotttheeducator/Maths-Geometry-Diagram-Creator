@@ -90,6 +90,17 @@ export class Quadrilateral {
     this.notifyChange();
   }
 
+  // Corners and edge midpoints are what other shapes snap to when building a
+  // composite; the outline is what "Turn into prism" extrudes.
+  snapPoints() {
+    const c = this.corners();
+    return [...c, ...c.map((p, i) => midpoint(p, c[(i + 1) % c.length]))];
+  }
+
+  outline() {
+    return this.corners();
+  }
+
   notifyChange() {
     this.render();
     if (this.controller?.onChange) this.controller.onChange(this);
@@ -491,6 +502,8 @@ export class Quadrilateral {
     const onMove = (ev) => {
       const cur = toSvgPoint(svg, ev.clientX, ev.clientY);
       this.origin = { x: startOrigin.x + (cur.x - start.x), y: startOrigin.y + (cur.y - start.y) };
+      const nudge = this.controller?.snapNudge?.(this);
+      if (nudge) this.origin = { x: this.origin.x + nudge.dx, y: this.origin.y + nudge.dy };
       this.render();
     };
     const onUp = () => {

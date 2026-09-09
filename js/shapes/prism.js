@@ -1,14 +1,17 @@
 import { round1, nextId, PX_PER_UNIT, clamp, midpoint } from "../geometry.js";
-import { el, text, clear, toSvgPoint, renderRemovableLabel } from "../svgUtil.js";
+import { el, clear, toSvgPoint, renderRemovableLabel } from "../svgUtil.js";
 import { parseFieldInput } from "../fieldInput.js";
 import { faceFill } from "../palette.js";
 
 const DEG = Math.PI / 180;
 
-// A prism drawn in oblique projection: a flat front face, plus a depth vector that
-// offsets a copy of it behind. Faces are filled with three tints of one hue (front
-// lightest, top mid, side darkest) -- that shading is what makes a flat drawing read
-// as a solid, and it's exactly how the textbook diagrams do it.
+// A prism drawn in oblique projection: any flat base polygon, plus a depth vector
+// that offsets a copy of it behind. Faces are filled with three tints of one hue
+// (front lightest, top mid, side darkest) -- that shading is what makes a flat
+// drawing read as a solid, and it's how the textbook diagrams do it.
+//
+// The base can be a rectangle, triangle, parallelogram or regular polygon, or an
+// arbitrary outline handed over from a 2D shape via "Turn into prism".
 export class Prism {
   constructor({
     origin,
@@ -16,21 +19,29 @@ export class Prism {
     heightPx = 130,
     depthPx = 90,
     depthAngleDeg = -32,
-    base = "rectangle",
+    baseKind = "rectangle",
+    slantDeg = 65,
+    sides = 6,
+    radiusPx = 90,
+    customPoints = null,
     id,
   } = {}) {
     this.id = id || nextId("prism");
     this.type = "prism";
-    this.origin = origin || { x: 380, y: 450 }; // front face, bottom-left
+    this.origin = origin || { x: 380, y: 450 }; // front face, bottom-left of its bounding box
     this.widthPx = widthPx;
     this.heightPx = heightPx;
     this.depthPx = depthPx;
     this.depthAngleDeg = depthAngleDeg;
-    this.base = base; // "rectangle" | "triangle"
+    this.baseKind = baseKind; // rectangle | triangle | parallelogram | polygon | custom
+    this.slantDeg = slantDeg;
+    this.sides = sides;
+    this.radiusPx = radiusPx;
+    this.customPoints = customPoints; // local coords, used when baseKind === "custom"
     this.fillId = "green";
     this.showHiddenEdges = false;
-    this.showApexHeight = false; // triangular prism's perpendicular height
-    this.overrides = {}; // width | height | depth -> "" hidden, or custom text
+    this.showApexHeight = false;
+    this.overrides = {};
     this.selected = false;
     this.group = null;
     this.controller = null;
@@ -43,22 +54,69 @@ export class Prism {
     };
   }
 
-  // Front-face outline, anticlockwise from the bottom-left.
-  frontFace() {
-    const o = this.origin;
-    if (this.base === "triangle") {
+  // Any 2D outline (absolute canvas points) becomes a prism with that outline as its
+  // base -- this is what the "Turn into prism" button hands over.
+  static fromOutline(points) {
+    const minX = Math.min(...points.map((p) => p.x));
+    const maxY = Math.max(...points.map((p) => p.y));
+    return new Prism({
+      origin: { x: minX, y: maxY },
+      baseKind: "custom",
+      customPoints: points.map((p) => ({ x: p.x - minX, y: p.y - maxY })),
+    });
+  }
+
+  // Base outline in local coordinates, bottom-left of its bounding box at (0,0), and
+  // always wound the same way so the "outward" test in render() culls the right faces
+  // whatever the base is.
+  basePolygonLocal() {
+    return windOutward(this.baseOutlineLocal());
+  }
+
+  baseOutlineLocal() {
+    if (this.baseKind === "custom" && this.customPoints?.length >= 3) return this.customPoints;
+    if (this.baseKind === "triangle") {
       return [
-        { x: o.x, y: o.y },
-        { x: o.x + this.widthPx, y: o.y },
-        { x: o.x + this.widthPx / 2, y: o.y - this.heightPx },
+        { x: 0, y: 0 },
+        { x: this.widthPx, y: 0 },
+        { x: this.widthPx / 2, y: -this.heightPx },
       ];
     }
+    if (this.baseKind === "parallelogram") {
+      const sx = this.heightPx * Math.cos(-this.slantDeg * DEG);
+      const sy = this.heightPx * Math.sin(-this.slantDeg * DEG);
+      const pts = [
+        { x: 0, y: 0 },
+        { x: this.widthPx, y: 0 },
+        { x: this.widthPx + sx, y: sy },
+        { x: sx, y: sy },
+      ];
+      const minX = Math.min(...pts.map((p) => p.x));
+      return pts.map((p) => ({ x: p.x - minX, y: p.y }));
+    }
+    if (this.baseKind === "polygon") {
+      // Start angle chosen so the polygon sits on a flat bottom edge.
+      const n = this.sides;
+      const start = 90 + 180 / n;
+      const pts = [];
+      for (let k = 0; k < n; k++) {
+        const a = (start + (k * 360) / n) * DEG;
+        pts.push({ x: this.radiusPx * Math.cos(a), y: this.radiusPx * Math.sin(a) });
+      }
+      const minX = Math.min(...pts.map((p) => p.x));
+      const maxY = Math.max(...pts.map((p) => p.y));
+      return pts.map((p) => ({ x: p.x - minX, y: p.y - maxY }));
+    }
     return [
-      { x: o.x, y: o.y },
-      { x: o.x + this.widthPx, y: o.y },
-      { x: o.x + this.widthPx, y: o.y - this.heightPx },
-      { x: o.x, y: o.y - this.heightPx },
+      { x: 0, y: 0 },
+      { x: this.widthPx, y: 0 },
+      { x: this.widthPx, y: -this.heightPx },
+      { x: 0, y: -this.heightPx },
     ];
+  }
+
+  frontFace() {
+    return this.basePolygonLocal().map((p) => ({ x: this.origin.x + p.x, y: this.origin.y + p.y }));
   }
 
   backFace() {
@@ -76,12 +134,21 @@ export class Prism {
     return this.depthPx / PX_PER_UNIT;
   }
 
+  // Shoelace on the base outline -- one formula that covers every base kind,
+  // including an arbitrary outline handed over from another shape.
+  baseAreaUnits() {
+    const pts = this.basePolygonLocal();
+    let sum = 0;
+    for (let i = 0; i < pts.length; i++) {
+      const a = pts[i];
+      const b = pts[(i + 1) % pts.length];
+      sum += a.x * b.y - b.x * a.y;
+    }
+    return Math.abs(sum / 2) / (PX_PER_UNIT * PX_PER_UNIT);
+  }
+
   volumeUnits() {
-    const area =
-      this.base === "triangle"
-        ? 0.5 * this.widthUnits() * this.heightUnits()
-        : this.widthUnits() * this.heightUnits();
-    return area * this.depthUnits();
+    return this.baseAreaUnits() * this.depthUnits();
   }
 
   // --- editing -----------------------------------------------------------
@@ -91,6 +158,10 @@ export class Prism {
     this.notifyChange();
   }
 
+  snapPoints() {
+    return [...this.frontFace(), ...this.backFace()];
+  }
+
   notifyChange() {
     this.render();
     if (this.controller?.onChange) this.controller.onChange(this);
@@ -98,24 +169,30 @@ export class Prism {
 
   getFields() {
     const val = (name, computed) => (this.overrides[name] !== undefined ? this.overrides[name] : round1(computed));
-    const fields = [
-      {
-        key: "base-rectangle",
-        group: "Shape",
-        label: "Rectangular prism",
-        kind: "toggle",
-        value: this.base === "rectangle",
-      },
-      {
-        key: "base-triangle",
-        group: "Shape",
-        label: "Triangular prism",
-        kind: "toggle",
-        value: this.base === "triangle",
-      },
+    const fields = [];
+    const kinds = [
+      ["rectangle", "Rectangular"],
+      ["triangle", "Triangular"],
+      ["parallelogram", "Parallelogram"],
+      ["polygon", "Polygon"],
     ];
-    fields.push({ key: "width", group: "Measurements", label: "Width", kind: "length", value: val("width", this.widthUnits()) });
-    fields.push({ key: "height", group: "Measurements", label: "Height", kind: "length", value: val("height", this.heightUnits()) });
+    if (this.baseKind === "custom") {
+      fields.push({ key: "base-info", group: "Base", label: "Base", kind: "info", value: "Custom outline" });
+    }
+    for (const [id, label] of kinds) {
+      fields.push({ key: `base-${id}`, group: "Base", label, kind: "toggle", value: this.baseKind === id });
+    }
+
+    if (this.baseKind === "polygon") {
+      fields.push({ key: "sides", group: "Base", label: "Sides", kind: "angle", value: this.sides });
+      fields.push({ key: "radius", group: "Measurements", label: "Radius", kind: "length", value: val("radius", this.radiusPx / PX_PER_UNIT) });
+    } else if (this.baseKind !== "custom") {
+      fields.push({ key: "width", group: "Measurements", label: "Width", kind: "length", value: val("width", this.widthUnits()) });
+      fields.push({ key: "height", group: "Measurements", label: "Height", kind: "length", value: val("height", this.heightUnits()) });
+      if (this.baseKind === "parallelogram") {
+        fields.push({ key: "slant", group: "Measurements", label: "Base angle", kind: "angle", value: round1(this.slantDeg) });
+      }
+    }
     fields.push({ key: "depth", group: "Measurements", label: "Depth", kind: "length", value: val("depth", this.depthUnits()) });
     fields.push({
       key: "volume",
@@ -125,7 +202,7 @@ export class Prism {
       readOnly: true,
       value: round1(this.volumeUnits()),
     });
-    if (this.base === "triangle") {
+    if (this.baseKind === "triangle") {
       fields.push({
         key: "show-apex-height",
         group: "Measurements",
@@ -153,13 +230,11 @@ export class Prism {
   }
 
   setField(key, value) {
-    if (key === "base-rectangle") {
-      if (value) this.base = "rectangle";
-      this.notifyChange();
-      return;
-    }
-    if (key === "base-triangle") {
-      if (value) this.base = "triangle";
+    if (key.startsWith("base-") && key !== "base-info") {
+      if (value) {
+        this.baseKind = key.slice(5);
+        this.customPoints = null;
+      }
       this.notifyChange();
       return;
     }
@@ -178,12 +253,22 @@ export class Prism {
       this.notifyChange();
       return;
     }
+    if (key === "sides") {
+      this.sides = clamp(Math.round(Number(value) || 6), 3, 12);
+      this.notifyChange();
+      return;
+    }
+    if (key === "slant") {
+      this.slantDeg = clamp(Number(value) || 65, 15, 165);
+      this.notifyChange();
+      return;
+    }
     if (key === "depth-angle") {
       this.depthAngleDeg = -clamp(Math.abs(Number(value) || 32), 10, 70);
       this.notifyChange();
       return;
     }
-    if (key === "volume") return; // derived
+    if (key === "volume" || key === "base-info") return;
 
     const parsed = parseFieldInput(value);
     if (parsed.hidden) {
@@ -201,6 +286,7 @@ export class Prism {
     if (key === "width") this.widthPx = px;
     else if (key === "height") this.heightPx = px;
     else if (key === "depth") this.depthPx = px;
+    else if (key === "radius") this.radiusPx = px;
     this.notifyChange();
   }
 
@@ -222,42 +308,29 @@ export class Prism {
     clear(this.group);
     const front = this.frontFace();
     const back = this.backFace();
+    const d = this.depthVector();
     const cls = `shape-poly${this.selected ? " selected" : ""}`;
     const poly = (pts, fill) =>
       el("polygon", { points: pts.map((p) => `${p.x},${p.y}`).join(" "), class: cls, fill });
 
-    // Hidden edges first (behind everything), then the far face, then the connecting
-    // faces, then the front face on top -- painter's order, so no z-fighting.
-    if (this.showHiddenEdges) {
-      const hiddenIdx = this.base === "triangle" ? [0] : [0];
-      for (const i of hiddenIdx) {
-        this.group.appendChild(
-          el("line", { x1: front[i].x, y1: front[i].y, x2: back[i].x, y2: back[i].y, class: "hidden-edge" })
-        );
-      }
-      this.group.appendChild(
-        el("polygon", {
-          points: back.map((p) => `${p.x},${p.y}`).join(" "),
-          class: "hidden-edge",
-          fill: "none",
-        })
-      );
-    }
+    // An edge's extruded quad faces the viewer exactly when the depth vector points
+    // outward across it, which culls the bottom and far-side faces automatically at
+    // any depth angle.
+    const visibleEdge = front.map((a, i) => {
+      const b = front[(i + 1) % front.length];
+      const edge = { x: b.x - a.x, y: b.y - a.y };
+      return edge.x * d.y - edge.y * d.x > 0;
+    });
 
-    // One extruded quad per front edge. An edge's quad is visible exactly when the
-    // depth vector points outward across it -- cross(edge, depth) > 0 for this
-    // winding -- which culls the bottom and far-side faces automatically, whichever
-    // way the depth vector is angled.
-    const d = this.depthVector();
     const cy = front.reduce((s, p) => s + p.y, 0) / front.length;
     for (let i = 0; i < front.length; i++) {
+      if (!visibleEdge[i]) continue;
       const a = front[i];
       const b = front[(i + 1) % front.length];
       const edge = { x: b.x - a.x, y: b.y - a.y };
-      if (edge.x * d.y - edge.y * d.x <= 0) continue;
       const quad = [a, b, { x: b.x + d.x, y: b.y + d.y }, { x: a.x + d.x, y: a.y + d.y }];
-      // A roughly-horizontal edge sitting above the face's middle is a top face;
-      // everything else reads as a side, and takes the darker tint.
+      // A roughly-horizontal edge above the face's middle reads as a top; everything
+      // else is a side and takes the darker tint.
       const isTop = Math.abs(edge.x) > Math.abs(edge.y) && (a.y + b.y) / 2 < cy;
       this.group.appendChild(poly(quad, faceFill(this.fillId, isTop ? "top" : "side")));
     }
@@ -266,7 +339,27 @@ export class Prism {
     frontPoly.addEventListener("pointerdown", (e) => this.onBodyPointerDown(e));
     this.group.appendChild(frontPoly);
 
-    if (this.base === "triangle" && this.showApexHeight) this.renderApexHeight(front);
+    // Hidden edges go on TOP of the opaque faces -- drawn underneath they'd simply be
+    // painted over. An edge is hidden when no visible face uses it: a back edge whose
+    // own quad is culled, or a connecting edge with a culled quad on both sides.
+    if (this.showHiddenEdges) {
+      const n = front.length;
+      for (let i = 0; i < n; i++) {
+        if (!visibleEdge[i]) {
+          const a = back[i];
+          const b = back[(i + 1) % n];
+          this.group.appendChild(el("line", { x1: a.x, y1: a.y, x2: b.x, y2: b.y, class: "hidden-edge" }));
+        }
+        const prev = (i - 1 + n) % n;
+        if (!visibleEdge[i] && !visibleEdge[prev]) {
+          this.group.appendChild(
+            el("line", { x1: front[i].x, y1: front[i].y, x2: back[i].x, y2: back[i].y, class: "hidden-edge" })
+          );
+        }
+      }
+    }
+
+    if (this.baseKind === "triangle" && this.showApexHeight) this.renderApexHeight(front);
 
     this.renderMeasurements(front, back);
     this.renderHandles(front, back);
@@ -288,24 +381,32 @@ export class Prism {
   }
 
   renderMeasurements(front, back) {
-    const bottomLeft = front[0];
-    const bottomRight = front[1];
-
-    // width along the bottom front edge
-    this.measureLabel("width", midpoint(bottomLeft, bottomRight), { x: 0, y: 26 }, this.widthUnits());
-
-    // height up the right-hand front edge (or to the apex for a triangular prism)
-    if (this.base === "rectangle") {
-      const rightMid = midpoint(front[1], front[2]);
-      this.measureLabel("height", rightMid, { x: 26, y: 0 }, this.heightUnits());
-    } else {
-      const apex = front[2];
-      this.measureLabel("height", midpoint({ x: apex.x, y: this.origin.y }, apex), { x: 22, y: 0 }, this.heightUnits());
+    if (this.baseKind === "rectangle" || this.baseKind === "triangle" || this.baseKind === "parallelogram") {
+      const bottomLeft = front[0];
+      const bottomRight = front[1];
+      this.measureLabel("width", midpoint(bottomLeft, bottomRight), { x: 0, y: 26 }, this.widthUnits());
+      if (this.baseKind === "triangle") {
+        const apex = front[2];
+        this.measureLabel("height", midpoint({ x: apex.x, y: this.origin.y }, apex), { x: 22, y: 0 }, this.heightUnits());
+      } else {
+        this.measureLabel("height", midpoint(front[1], front[2]), { x: 26, y: 0 }, this.heightUnits());
+      }
+      const depthMid = midpoint(bottomRight, back[1]);
+      this.measureLabel("depth", depthMid, { x: 20, y: 14 }, this.depthUnits());
+      return;
     }
-
-    // depth along the receding edge from the front-bottom-right corner
-    const depthMid = midpoint(bottomRight, back[1]);
-    this.measureLabel("depth", depthMid, { x: 20, y: 14 }, this.depthUnits());
+    // Polygon / custom bases: label the depth off the rightmost front vertex, and
+    // (for regular polygons) one base edge.
+    let far = front[0];
+    for (const p of front) if (p.x > far.x) far = p;
+    const idx = front.indexOf(far);
+    this.measureLabel("depth", midpoint(far, back[idx]), { x: 20, y: 14 }, this.depthUnits());
+    if (this.baseKind === "polygon") {
+      const a = front[0];
+      const b = front[1];
+      const sideUnits = Math.hypot(b.x - a.x, b.y - a.y) / PX_PER_UNIT;
+      this.measureLabel("side", midpoint(a, b), { x: 0, y: 24 }, sideUnits);
+    }
   }
 
   measureLabel(key, at, offset, computedUnits) {
@@ -328,16 +429,19 @@ export class Prism {
   }
 
   renderHandles(front, back) {
-    const wh = el("circle", { cx: front[1].x, cy: front[1].y, r: 6, class: "vertex-handle" });
-    wh.addEventListener("pointerdown", (e) => this.onSizePointerDown(e, "width"));
-    this.group.appendChild(wh);
+    if (this.baseKind === "rectangle" || this.baseKind === "triangle" || this.baseKind === "parallelogram") {
+      const wh = el("circle", { cx: front[1].x, cy: front[1].y, r: 6, class: "vertex-handle" });
+      wh.addEventListener("pointerdown", (e) => this.onSizePointerDown(e, "width"));
+      this.group.appendChild(wh);
 
-    const topPt = this.base === "triangle" ? front[2] : front[2];
-    const hh = el("circle", { cx: topPt.x, cy: topPt.y, r: 6, class: "vertex-handle" });
-    hh.addEventListener("pointerdown", (e) => this.onSizePointerDown(e, "height"));
-    this.group.appendChild(hh);
-
-    const dh = el("circle", { cx: back[1].x, cy: back[1].y, r: 6, class: "drag-handle" });
+      const hh = el("circle", { cx: front[2].x, cy: front[2].y, r: 6, class: "vertex-handle" });
+      hh.addEventListener("pointerdown", (e) => this.onSizePointerDown(e, "height"));
+      this.group.appendChild(hh);
+    }
+    let far = front[0];
+    for (const p of front) if (p.x > far.x) far = p;
+    const idx = front.indexOf(far);
+    const dh = el("circle", { cx: back[idx].x, cy: back[idx].y, r: 6, class: "drag-handle" });
     dh.addEventListener("pointerdown", (e) => this.onSizePointerDown(e, "depth"));
     this.group.appendChild(dh);
   }
@@ -353,6 +457,8 @@ export class Prism {
     const onMove = (ev) => {
       const cur = toSvgPoint(svg, ev.clientX, ev.clientY);
       this.origin = { x: startOrigin.x + (cur.x - start.x), y: startOrigin.y + (cur.y - start.y) };
+      const nudge = this.controller?.snapNudge?.(this);
+      if (nudge) this.origin = { x: this.origin.x + nudge.dx, y: this.origin.y + nudge.dy };
       this.render();
     };
     const onUp = () => {
@@ -377,8 +483,11 @@ export class Prism {
         this.heightPx = Math.max(20, this.origin.y - cur.y);
         delete this.overrides.height;
       } else {
-        const dx = cur.x - this.frontFace()[1].x;
-        const dy = cur.y - this.frontFace()[1].y;
+        const front = this.frontFace();
+        let far = front[0];
+        for (const p of front) if (p.x > far.x) far = p;
+        const dx = cur.x - far.x;
+        const dy = cur.y - far.y;
         this.depthPx = clamp(Math.hypot(dx, dy), 20, 400);
         const deg = (Math.atan2(dy, dx) * 180) / Math.PI;
         this.depthAngleDeg = -clamp(Math.abs(deg), 10, 70) * (deg < 0 ? 1 : -1);
@@ -408,4 +517,18 @@ export class Prism {
     e.stopPropagation();
     if (this.controller?.onInlineEdit) this.controller.onInlineEdit(this, fieldKey, currentValue, e);
   }
+}
+
+// The face-culling test in render() only works if every base is wound the same way
+// round. Rectangles, triangles and parallelograms are built with a negative shoelace
+// sum; regular polygons and outlines handed over from other shapes may come either
+// way, so reverse the ones that don't match.
+function windOutward(pts) {
+  let sum = 0;
+  for (let i = 0; i < pts.length; i++) {
+    const a = pts[i];
+    const b = pts[(i + 1) % pts.length];
+    sum += a.x * b.y - b.x * a.y;
+  }
+  return sum > 0 ? [...pts].reverse() : pts;
 }

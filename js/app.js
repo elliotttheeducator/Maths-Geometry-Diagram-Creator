@@ -4,6 +4,7 @@ import { LineGraph } from "./shapes/lineGraph.js";
 import { Circle } from "./shapes/circle.js";
 import { Quadrilateral } from "./shapes/quadrilateral.js";
 import { Prism } from "./shapes/prism.js";
+import { RegularPolygon } from "./shapes/polygon.js";
 import { renderSidebar } from "./sidebar.js";
 import { exportSvg, exportPng } from "./export.js";
 
@@ -18,11 +19,14 @@ const addLineBtn = document.getElementById("add-line");
 const addQuadBtn = document.getElementById("add-quad");
 const addCircleBtn = document.getElementById("add-circle");
 const addPrismBtn = document.getElementById("add-prism");
+const addPolygonBtn = document.getElementById("add-polygon");
+const toPrismBtn = document.getElementById("to-prism");
 const duplicateBtn = document.getElementById("duplicate-scaled");
 const deleteBtn = document.getElementById("delete-shape");
 const exportSvgBtn = document.getElementById("export-svg");
 const exportPngBtn = document.getElementById("export-png");
 const gridToggle = document.getElementById("toggle-grid");
+const snapToggle = document.getElementById("toggle-snap");
 
 let shapes = [];
 let selectedShape = null;
@@ -110,7 +114,38 @@ const controller = {
   onInlineEdit(shape, fieldKey, currentValue, evt) {
     openInlineEditor(shape, fieldKey, currentValue, evt);
   },
+  snapNudge(shape) {
+    return snapNudge(shape);
+  },
 };
+
+// --- snapping, so shapes can be butted together into a composite ----------
+//
+// While a shape is being dragged it offers a list of snap points (corners, edge
+// midpoints, a circle's centre and cardinal points). If any of them comes within
+// SNAP_RADIUS of a snap point on another shape, the drag is nudged so the two
+// coincide exactly -- which is what makes a composite shape hold together when it's
+// later resized or exported, rather than being aligned by eye to within a pixel.
+const SNAP_RADIUS = 12;
+
+function snapNudge(shape) {
+  if (snapToggle && !snapToggle.checked) return null;
+  if (typeof shape.snapPoints !== "function") return null;
+  const mine = shape.snapPoints();
+  let best = null;
+  for (const other of shapes) {
+    if (other === shape || typeof other.snapPoints !== "function") continue;
+    for (const t of other.snapPoints()) {
+      for (const m of mine) {
+        const dx = t.x - m.x;
+        const dy = t.y - m.y;
+        const d = Math.hypot(dx, dy);
+        if (d < SNAP_RADIUS && (!best || d < best.d)) best = { d, dx, dy };
+      }
+    }
+  }
+  return best && best.d > 0.001 ? { dx: best.dx, dy: best.dy } : null;
+}
 
 function selectShape(shape) {
   if (selectedShape && selectedShape !== shape) selectedShape.setSelected(false);
@@ -128,6 +163,7 @@ function updateToolbarState() {
   const hasSelection = !!selectedShape;
   deleteBtn.disabled = !hasSelection;
   duplicateBtn.disabled = !(hasSelection && selectedShape.type === "triangle");
+  toPrismBtn.disabled = !(hasSelection && typeof selectedShape.outline === "function");
 }
 
 function addShape(shape) {
@@ -183,6 +219,24 @@ addPrismBtn.addEventListener("click", () => {
   spawnOffset += 1;
   const o = ((spawnOffset - 1) % 4) * 28 - 40;
   addShape(new Prism({ origin: { x: 380 + o, y: 450 + o } }));
+});
+
+addPolygonBtn.addEventListener("click", () => {
+  spawnOffset += 1;
+  const o = ((spawnOffset - 1) % 4) * 28 - 40;
+  addShape(new RegularPolygon({ center: { x: 500 + o, y: 350 + o } }));
+});
+
+// Extrude the selected 2D shape's outline into a prism, keeping its colour -- so a
+// parallelogram prism is just "draw the parallelogram, then turn it into a prism".
+toPrismBtn.addEventListener("click", () => {
+  if (!selectedShape || typeof selectedShape.outline !== "function") return;
+  const prism = Prism.fromOutline(selectedShape.outline());
+  if (selectedShape.fillId) prism.fillId = selectedShape.fillId;
+  selectedShape.destroy();
+  shapes = shapes.filter((s) => s !== selectedShape);
+  selectedShape = null;
+  addShape(prism);
 });
 
 // "+Line" adds a segment to the currently-selected line graph (so repeated

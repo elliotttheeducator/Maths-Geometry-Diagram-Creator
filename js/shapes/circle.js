@@ -72,6 +72,14 @@ export class Circle {
     this.notifyChange();
   }
 
+  // Centre, the four cardinal points, and (for a sector) the two arc ends -- enough
+  // to butt a semicircle onto a rectangle, which is the usual composite.
+  snapPoints() {
+    const pts = [this.center, ...[0, 90, 180, 270].map((d) => this.pointAt(d))];
+    if (this.mode !== "circle") pts.push(this.pointAt(this.startAngleDeg), this.pointAt(this.startAngleDeg + this.sweepDeg));
+    return pts;
+  }
+
   notifyChange() {
     this.render();
     if (this.controller?.onChange) this.controller.onChange(this);
@@ -351,6 +359,8 @@ export class Circle {
     const onMove = (ev) => {
       const cur = toSvgPoint(svg, ev.clientX, ev.clientY);
       this.center = { x: startCenter.x + (cur.x - start.x), y: startCenter.y + (cur.y - start.y) };
+      const nudge = this.controller?.snapNudge?.(this);
+      if (nudge) this.center = { x: this.center.x + nudge.dx, y: this.center.y + nudge.dy };
       this.render();
     };
     const onUp = () => {

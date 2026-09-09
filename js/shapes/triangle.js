@@ -253,6 +253,17 @@ export class Triangle {
     this.notifyChange();
   }
 
+  // Vertices and edge midpoints are the points other shapes snap to; the outline is
+  // what "Turn into prism" extrudes.
+  snapPoints() {
+    const p = this.points;
+    return [...p, ...p.map((pt, i) => midpoint(pt, p[(i + 1) % 3]))];
+  }
+
+  outline() {
+    return this.points.map((p) => ({ ...p }));
+  }
+
   translate(dx, dy) {
     this.points = this.points.map((p) => ({ x: p.x + dx, y: p.y + dy }));
     this.notifyChange();
@@ -874,6 +885,8 @@ export class Triangle {
       const dx = cur.x - start.x;
       const dy = cur.y - start.y;
       this.points = startPoints.map((p) => ({ x: p.x + dx, y: p.y + dy }));
+      const nudge = this.controller?.snapNudge?.(this);
+      if (nudge) this.points = this.points.map((p) => ({ x: p.x + nudge.dx, y: p.y + nudge.dy }));
       this.render();
     };
     const onUp = () => {

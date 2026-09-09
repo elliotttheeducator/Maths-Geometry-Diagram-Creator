@@ -28,6 +28,7 @@ const JS_FILES = [
   "js/shapes/circle.js",
   "js/shapes/quadrilateral.js",
   "js/shapes/prism.js",
+  "js/shapes/polygon.js",
   "js/app.js",
 ];
 
