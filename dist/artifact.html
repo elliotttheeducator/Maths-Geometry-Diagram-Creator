@@ -117,6 +117,82 @@
   color: var(--accent);
 }
 
+/* A worksheet's worth of diagrams at once: one card each, so any single one can be
+   copied into a document without re-rendering the lot. */
+.export-sheet {
+  max-width: min(94vw, 980px);
+}
+
+.export-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 14px;
+}
+
+.export-card {
+  margin: 0;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  background: #ffffff;
+}
+
+.export-card img {
+  width: 100%;
+  height: 130px;
+  object-fit: contain;
+  display: block;
+}
+
+.export-card figcaption {
+  font-size: 12px;
+  color: #6b7280;
+  text-align: center;
+}
+
+.export-card-actions {
+  display: flex;
+  gap: 6px;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+
+.export-card-actions button {
+  padding: 3px 9px;
+  font-size: 12px;
+}
+
+.spec-modal {
+  max-width: min(92vw, 760px);
+  width: 760px;
+}
+
+.spec-input {
+  width: 100%;
+  box-sizing: border-box;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 13px;
+  line-height: 1.5;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  resize: vertical;
+}
+
+.spec-input.ai-card {
+  font-size: 12px;
+}
+
+.spec-messages {
+  margin: 8px 0 0;
+  font-size: 12.5px;
+  color: #b45309;
+  min-height: 1em;
+}
+
 body {
   margin: 0;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
@@ -560,6 +636,7 @@ button.danger-btn:hover:not(:disabled) {
     <div class="toolbar-group">
       <label class="checkbox-label"><input type="checkbox" id="toggle-grid" /> Grid</label>
       <label class="checkbox-label"><input type="checkbox" id="toggle-snap" checked /> Snap</label>
+      <button id="open-spec">Spec…</button>
       <button id="export-svg">Export SVG</button>
       <button id="export-png">Export PNG</button>
     </div>
@@ -1072,7 +1149,7 @@ return { renderSidebar };
 })();
 
 // --- js/export.js ---
-const { exportSvg, exportPng } = (function () {
+const { exportSvg, exportPng, canDownload, exportSheet } = (function () {
 const EXPORT_SCALE = 2; // render at 2x for crisp pasting into a Word doc / slide
 
 // The live page's shape styling lives in style.css, which is NOT included when an
@@ -1109,7 +1186,7 @@ function measureContentBBox(svgEl) {
   probe.style.left = "-99999px";
   probe.style.top = "0";
   document.body.appendChild(probe);
-  const layer = probe.querySelector("#shapes-layer");
+  const layer = probe.querySelector("#shapes-layer, .shapes-layer");
   let box = null;
   if (layer && layer.childNodes.length) {
     const b = layer.getBBox();
@@ -1243,6 +1320,15 @@ function showExportModal({ kind, imgSrc, blob, svgText }) {
     actions.appendChild(copyCodeBtn);
   }
 
+  const saveBtn = document.createElement("button");
+  saveBtn.textContent = "Save file";
+  saveBtn.hidden = true;
+  saveBtn.addEventListener("click", () => saveFile(blob, `diagram.${kind}`, flashStatus));
+  actions.appendChild(saveBtn);
+  canDownload().then((ok) => {
+    saveBtn.hidden = !ok;
+  });
+
   const closeBtn = document.createElement("button");
   closeBtn.textContent = "Close";
   closeBtn.addEventListener("click", closeExportModal);
@@ -1289,7 +1375,195 @@ async function exportPng(svgEl) {
   const dataUrl = URL.createObjectURL(blob);
   showExportModal({ kind: "png", imgSrc: dataUrl, blob, svgText: null });
 }
-return { exportSvg, exportPng };
+
+// --- saving files ---------------------------------------------------------
+//
+// Two different hosts, two different rules. Served as an ordinary page (GitHub Pages,
+// or a local server) a link with `download` just works. Inside a Claude artifact the
+// viewer's sandbox makes that inert, and the way to hand over a file is the platform's
+// `downloads` capability, which shows the viewer a confirmation. Resolution is started
+// at load because it can take a moment to answer, and returns null wherever the
+// capability isn't granted -- in which case the save affordance is hidden entirely and
+// copy-to-clipboard is the route.
+const downloadsReady = (async () => {
+  try {
+    return window.claude?.use ? await window.claude.use("downloads") : null;
+  } catch {
+    return null;
+  }
+})();
+
+function isTopLevel() {
+  try {
+    return window.self === window.top;
+  } catch {
+    return false;
+  }
+}
+
+async function canDownload() {
+  return isTopLevel() || Boolean(await downloadsReady);
+}
+
+async function saveFile(blob, filename, flash = () => {}) {
+  const downloads = await downloadsReady;
+  if (downloads) {
+    try {
+      await downloads.save({ filename, data: blob });
+      flash(`Saved ${filename}.`);
+    } catch (err) {
+      const code = err && err.code;
+      if (code === "declined") return; // the viewer said no; nothing to report
+      flash(
+        code === "rate_limited"
+          ? "One save at a time -- try that again in a moment."
+          : `Couldn't save ${filename} here -- use Copy instead.`
+      );
+    }
+    return;
+  }
+  if (isTopLevel()) {
+    downloadBlob(blob, filename);
+    return;
+  }
+  flash("Saving isn't available here -- use Copy instead.");
+}
+
+async function blobBytes(blob) {
+  return new Uint8Array(await blob.arrayBuffer());
+}
+
+async function exportSheet(entries, { onOpen } = {}) {
+  closeExportModal();
+  const overlay = document.createElement("div");
+  overlay.className = "export-modal-overlay";
+  overlay.addEventListener("click", (e) => {
+    if (e.target === overlay) closeExportModal();
+  });
+
+  const panel = document.createElement("div");
+  panel.className = "export-modal export-sheet";
+
+  const title = document.createElement("h3");
+  title.textContent = `${entries.length} diagram${entries.length === 1 ? "" : "s"}`;
+  panel.appendChild(title);
+
+  const savingAvailable = await canDownload();
+
+  const hint = document.createElement("p");
+  hint.className = "export-hint";
+  hint.textContent = savingAvailable
+    ? 'Copy any diagram straight into your document, save one on its own, or "Save all" for a zip of every PNG.'
+    : 'Copy any diagram straight into your document, or right-click (long-press) it and choose "Save Image As".';
+  panel.appendChild(hint);
+
+  const statusEl = document.createElement("span");
+  statusEl.className = "export-status";
+  const flashStatus = (msg) => {
+    statusEl.textContent = msg;
+    setTimeout(() => {
+      statusEl.textContent = "";
+    }, 2500);
+  };
+
+  const grid = document.createElement("div");
+  grid.className = "export-grid";
+  panel.appendChild(grid);
+
+  const built = [];
+  for (let i = 0; i < entries.length; i++) {
+    const { svgEl, name } = entries[i];
+    const blob = await buildPngBlob(svgEl);
+    const url = URL.createObjectURL(blob);
+    built.push({ blob, url, name: name || `diagram-${i + 1}` });
+
+    const card = document.createElement("figure");
+    card.className = "export-card";
+    const img = document.createElement("img");
+    img.src = url;
+    img.alt = `Diagram ${i + 1}`;
+    card.appendChild(img);
+
+    const caption = document.createElement("figcaption");
+    caption.textContent = `${i + 1}`;
+    card.appendChild(caption);
+
+    const row = document.createElement("div");
+    row.className = "export-card-actions";
+    const copyBtn = document.createElement("button");
+    copyBtn.textContent = "Copy";
+    copyBtn.addEventListener("click", async () => {
+      try {
+        await navigator.clipboard.write([new ClipboardItem({ [blob.type]: blob })]);
+        flashStatus(`Diagram ${i + 1} copied.`);
+      } catch {
+        flashStatus("Copy not available here -- right-click the image instead.");
+      }
+    });
+    row.appendChild(copyBtn);
+
+    if (savingAvailable) {
+      const saveBtn = document.createElement("button");
+      saveBtn.textContent = "Save";
+      saveBtn.addEventListener("click", () => saveFile(blob, `${built[i].name}.png`, flashStatus));
+      row.appendChild(saveBtn);
+    }
+    if (onOpen) {
+      const openBtn = document.createElement("button");
+      openBtn.textContent = "Edit";
+      openBtn.title = "Load this one into the canvas to adjust it";
+      openBtn.addEventListener("click", () => {
+        closeExportModal();
+        onOpen(i);
+      });
+      row.appendChild(openBtn);
+    }
+    card.appendChild(row);
+    grid.appendChild(card);
+  }
+
+  const actions = document.createElement("div");
+  actions.className = "export-actions";
+  if (savingAvailable && built.length > 1) {
+    // One zip rather than one save per diagram: a dozen separate saves means a dozen
+    // confirmations in the artifact viewer, and a dozen files loose in Downloads.
+    const allBtn = document.createElement("button");
+    allBtn.textContent = "Save all";
+    allBtn.className = "primary";
+    allBtn.addEventListener("click", async () => {
+      allBtn.disabled = true;
+      try {
+        const files = [];
+        for (const item of built) files.push({ name: `${item.name}.png`, data: await blobBytes(item.blob) });
+        await saveFile(makeZip(files), "diagrams.zip", flashStatus);
+      } finally {
+        allBtn.disabled = false;
+      }
+    });
+    actions.appendChild(allBtn);
+  }
+  const closeBtn = document.createElement("button");
+  closeBtn.textContent = "Close";
+  closeBtn.addEventListener("click", closeExportModal);
+  actions.appendChild(closeBtn);
+  actions.appendChild(statusEl);
+  panel.appendChild(actions);
+
+  overlay.appendChild(panel);
+  document.body.appendChild(overlay);
+  currentExportOverlay = overlay;
+}
+
+function downloadBlob(blob, filename) {
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 10000);
+}
+return { exportSvg, exportPng, canDownload, exportSheet };
 })();
 
 // --- js/shapes/triangle.js ---
@@ -2657,6 +2931,11 @@ class LineGraph {
     this.angleLocks = {}; // vertex-junction pairKey -> locked degree value
     this.angleOverrides = {}; // any-junction pairKey -> display override ("" = hidden)
     this.fillColors = {}; // cycleKey -> pastel hex or "none"
+    // Chevrons and ticks are the point of a hand-built angle diagram, but on a
+    // composite outline (where every horizontal side is parallel to every other)
+    // they're just noise -- so they can be switched off per diagram.
+    this.showParallelMarks = true;
+    this.showEqualMarks = true;
     this._spawnCount = 0;
     this._vertexCount = 0;
     this._idCount = 0;
@@ -2697,6 +2976,83 @@ class LineGraph {
     return this.segments.filter((s) => s.aId === vertexId || s.bId === vertexId);
   }
 
+  connect(a, b) {
+    const seg = {
+      id: this.nextSegmentId(),
+      aId: a.id,
+      bId: b.id,
+      color: DEFAULT_COLOR,
+      lengthLocked: false,
+      lengthLockUnits: null,
+      lengthOverride: undefined,
+    };
+    this.segments.push(seg);
+    return seg;
+  }
+
+  // Builds a whole outline in one go from explicit points -- what a written spec
+  // (`path 0,0 6,0 6,3 ...`) turns into, and the quickest route to the irregular
+  // composite figures that area questions are built from.
+  buildPath(points, { closed = false } = {}) {
+    const vs = points.map((p) => this.addVertex(p.x, p.y));
+    for (let i = 0; i < vs.length - 1; i++) this.connect(vs[i], vs[i + 1]);
+    if (closed && vs.length > 2) this.connect(vs[vs.length - 1], vs[0]);
+    this.notifyChange();
+    return vs;
+  }
+
+  // The inverse of buildPath: if this graph happens to be one simple chain (every
+  // vertex meeting one or two segments, all of it connected), return its points in
+  // order so it can be written back out as a `path` line. Anything branchier has no
+  // single-path form, and says so rather than emitting something wrong.
+  asChain() {
+    if (this.segments.length === 0) return null;
+    const neighbours = new Map(this.vertices.map((v) => [v.id, []]));
+    for (const s of this.segments) {
+      if (!neighbours.has(s.aId) || !neighbours.has(s.bId)) return null;
+      neighbours.get(s.aId).push(s.bId);
+      neighbours.get(s.bId).push(s.aId);
+    }
+    const degrees = [...neighbours.values()].map((list) => list.length);
+    if (degrees.some((d) => d < 1 || d > 2)) return null;
+
+    const ends = [...neighbours.entries()].filter(([, list]) => list.length === 1).map(([id]) => id);
+    const closed = ends.length === 0;
+    if (!closed && ends.length !== 2) return null;
+
+    const startId = closed ? this.vertices[0].id : ends[0];
+    const order = [startId];
+    let prev = null;
+    let current = startId;
+    while (true) {
+      const next = neighbours.get(current).find((id) => id !== prev);
+      if (next === undefined || next === startId) break;
+      order.push(next);
+      prev = current;
+      current = next;
+    }
+    if (order.length !== this.vertices.length) return null; // disconnected pieces
+    return { points: order.map((id) => this.getVertex(id)), closed };
+  }
+
+  // Hides every angle label at once. A composite outline is usually all right angles,
+  // and labelling each of them buries the side lengths the question is actually about;
+  // the marks themselves stay, and any angle can be brought back by clicking its plus.
+  hideAllAngles() {
+    for (const junction of this.computeJunctions()) {
+      for (const { r1, r2 } of this.anglePairsForJunction(junction)) {
+        this.angleOverrides[[r1.rayId, r2.rayId].sort().join("|")] = "";
+      }
+    }
+    this.notifyChange();
+  }
+
+  // Fills every closed loop the path encloses -- the usual intent for a spec'd outline.
+  fillAllCycles(paletteId) {
+    for (const cycle of this.findCycles()) this.fillColors[this.cycleKey(cycle)] = paletteId;
+    this.notifyChange();
+  }
+
   // Adds a brand new, disconnected 2-point segment. If `fromVertexId` is given,
   // it "sprouts" a new connected segment from that existing vertex instead.
   addSegment(fromVertexId) {
@@ -2709,16 +3065,7 @@ class LineGraph {
       a = this.addVertex(420 + o, 330 + o);
     }
     const b = this.addVertex(a.x + 160, a.y + o * 0 - 10);
-    const seg = {
-      id: this.nextSegmentId(),
-      aId: a.id,
-      bId: b.id,
-      color: DEFAULT_COLOR,
-      lengthLocked: false,
-      lengthLockUnits: null,
-      lengthOverride: undefined,
-    };
-    this.segments.push(seg);
+    const seg = this.connect(a, b);
     this.notifyChange();
     return seg;
   }
@@ -3127,6 +3474,21 @@ class LineGraph {
       });
     }
 
+    fields.push({
+      key: "marks-parallel",
+      group: "Marks",
+      label: "Parallel chevrons",
+      kind: "toggle",
+      value: this.showParallelMarks,
+    });
+    fields.push({
+      key: "marks-equal",
+      group: "Marks",
+      label: "Equal-length ticks",
+      kind: "toggle",
+      value: this.showEqualMarks,
+    });
+
     return fields;
   }
 
@@ -3143,6 +3505,16 @@ class LineGraph {
   }
 
   setField(key, value) {
+    if (key === "marks-parallel") {
+      this.showParallelMarks = Boolean(value);
+      this.notifyChange();
+      return;
+    }
+    if (key === "marks-equal") {
+      this.showEqualMarks = Boolean(value);
+      this.notifyChange();
+      return;
+    }
     if (key.startsWith("vlabel:")) {
       const vId = key.slice(7);
       const parsed = parseFieldInput(value);
@@ -3343,12 +3715,12 @@ class LineGraph {
       const mid = midpoint(A, B);
 
       const dirGroup = dirGroups[i];
-      if (dirGroup.size >= 2) {
+      if (this.showParallelMarks && dirGroup.size >= 2) {
         const pos = { x: mid.x - dir.x * 16, y: mid.y - dir.y * 16 };
         container.appendChild(this.drawChevronMarks(pos, dir, Math.min(dirGroup.index + 1, 3)));
       }
       const lenGroup = lenGroups[i];
-      if (lenGroup.size >= 2) {
+      if (this.showEqualMarks && lenGroup.size >= 2) {
         const pos = { x: mid.x + dir.x * 16, y: mid.y + dir.y * 16 };
         container.appendChild(this.drawTickMarks(pos, dir, Math.min(lenGroup.index + 1, 3)));
       }
@@ -4807,6 +5179,12 @@ class Prism {
     return this.depthPx / PX_PER_UNIT;
   }
 
+  // Side length of a regular-polygon base -- the measurement that's actually quoted
+  // in a question, where the circumradius almost never is.
+  baseSideUnits() {
+    return (2 * this.radiusPx * Math.sin(Math.PI / this.sides)) / PX_PER_UNIT;
+  }
+
   // Shoelace on the base outline -- one formula that covers every base kind,
   // including an arbitrary outline handed over from another shape.
   baseAreaUnits() {
@@ -4858,6 +5236,7 @@ class Prism {
 
     if (this.baseKind === "polygon") {
       fields.push({ key: "sides", group: "Base", label: "Sides", kind: "angle", value: this.sides });
+      fields.push({ key: "side", group: "Measurements", label: "Side", kind: "length", value: val("side", this.baseSideUnits()) });
       fields.push({ key: "radius", group: "Measurements", label: "Radius", kind: "length", value: val("radius", this.radiusPx / PX_PER_UNIT) });
     } else if (this.baseKind !== "custom") {
       fields.push({ key: "width", group: "Measurements", label: "Width", kind: "length", value: val("width", this.widthUnits()) });
@@ -4960,6 +5339,7 @@ class Prism {
     else if (key === "height") this.heightPx = px;
     else if (key === "depth") this.depthPx = px;
     else if (key === "radius") this.radiusPx = px;
+    else if (key === "side") this.radiusPx = px / (2 * Math.sin(Math.PI / this.sides));
     this.notifyChange();
   }
 
@@ -5595,6 +5975,780 @@ function unitTo(from, to) {
 return { RegularPolygon };
 })();
 
+// --- js/zip.js ---
+const { makeZip } = (function () {
+// A minimal ZIP writer, so a whole worksheet's diagrams can be handed over as one
+// file instead of one save prompt per image. Entries are STORED (no compression):
+// PNGs are already compressed, so deflating them would cost a dependency and save
+// nothing. Enough of the format to be read by Windows, macOS and every unzip tool:
+// a local header per file, a central directory, and an end-of-central-directory record.
+
+const CRC_TABLE = (() => {
+  const table = new Uint32Array(256);
+  for (let i = 0; i < 256; i++) {
+    let c = i;
+    for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+    table[i] = c >>> 0;
+  }
+  return table;
+})();
+
+function crc32(bytes) {
+  let c = 0xffffffff;
+  for (let i = 0; i < bytes.length; i++) c = CRC_TABLE[(c ^ bytes[i]) & 0xff] ^ (c >>> 8);
+  return (c ^ 0xffffffff) >>> 0;
+}
+
+// MS-DOS packed date/time, which is what the format stores.
+function dosDateTime(date) {
+  const time = (date.getHours() << 11) | (date.getMinutes() << 5) | (date.getSeconds() >> 1);
+  const day = ((date.getFullYear() - 1980) << 9) | ((date.getMonth() + 1) << 5) | date.getDate();
+  return { time, day };
+}
+
+// files: [{ name, data: Uint8Array }] -> Blob
+function makeZip(files, when = new Date()) {
+  const { time, day } = dosDateTime(when);
+  const encoder = new TextEncoder();
+  const locals = [];
+  const centrals = [];
+  let offset = 0;
+
+  for (const file of files) {
+    const nameBytes = encoder.encode(file.name);
+    const data = file.data;
+    const crc = crc32(data);
+
+    const local = new Uint8Array(30 + nameBytes.length);
+    const lv = new DataView(local.buffer);
+    lv.setUint32(0, 0x04034b50, true);
+    lv.setUint16(4, 20, true); // version needed
+    lv.setUint16(6, 0, true); // flags
+    lv.setUint16(8, 0, true); // method: stored
+    lv.setUint16(10, time, true);
+    lv.setUint16(12, day, true);
+    lv.setUint32(14, crc, true);
+    lv.setUint32(18, data.length, true);
+    lv.setUint32(22, data.length, true);
+    lv.setUint16(26, nameBytes.length, true);
+    lv.setUint16(28, 0, true); // extra length
+    local.set(nameBytes, 30);
+    locals.push(local, data);
+
+    const central = new Uint8Array(46 + nameBytes.length);
+    const cv = new DataView(central.buffer);
+    cv.setUint32(0, 0x02014b50, true);
+    cv.setUint16(4, 20, true); // version made by
+    cv.setUint16(6, 20, true); // version needed
+    cv.setUint16(8, 0, true);
+    cv.setUint16(10, 0, true);
+    cv.setUint16(12, time, true);
+    cv.setUint16(14, day, true);
+    cv.setUint32(16, crc, true);
+    cv.setUint32(20, data.length, true);
+    cv.setUint32(24, data.length, true);
+    cv.setUint16(28, nameBytes.length, true);
+    cv.setUint16(30, 0, true); // extra
+    cv.setUint16(32, 0, true); // comment
+    cv.setUint16(34, 0, true); // disk number
+    cv.setUint16(36, 0, true); // internal attrs
+    cv.setUint32(38, 0, true); // external attrs
+    cv.setUint32(42, offset, true);
+    central.set(nameBytes, 46);
+    centrals.push(central);
+
+    offset += local.length + data.length;
+  }
+
+  const centralSize = centrals.reduce((sum, c) => sum + c.length, 0);
+  const end = new Uint8Array(22);
+  const ev = new DataView(end.buffer);
+  ev.setUint32(0, 0x06054b50, true);
+  ev.setUint16(4, 0, true);
+  ev.setUint16(6, 0, true);
+  ev.setUint16(8, files.length, true);
+  ev.setUint16(10, files.length, true);
+  ev.setUint32(12, centralSize, true);
+  ev.setUint32(16, offset, true);
+  ev.setUint16(20, 0, true);
+
+  return new Blob([...locals, ...centrals, end], { type: "application/zip" });
+}
+return { makeZip };
+})();
+
+// --- js/spec.js ---
+const { parseSpec, buildDiagram, shapeToSpecLine, diagramToSpec } = (function () {
+// A tiny written format for diagrams, so a diagram can be asked for in one line
+// instead of built by hand:
+//
+//   triangle a=80 b=80 ab=6 fill=cream
+//   ---
+//   prism base=poly n=6 side=2 depth=5 hidden
+//
+// Every key maps onto a real sidebar field, and the shape is driven through the same
+// setField() calls the sidebar makes -- so a spec'd diagram goes through exactly the
+// same solver, locks and honesty checks as a hand-built one, and can be picked up and
+// edited afterwards. `---` on its own line starts a new diagram.
+
+const ORIGIN = { x: 300, y: 480 }; // where path coordinates put (0,0)
+
+function parseSpec(text) {
+  const diagrams = [[]];
+  for (const rawLine of String(text).split(/\r?\n/)) {
+    const line = rawLine.replace(/\s+#.*$/, "").trim();
+    if (!line || line.startsWith("#")) continue;
+    if (/^-{3,}$/.test(line)) {
+      diagrams.push([]);
+      continue;
+    }
+    diagrams[diagrams.length - 1].push(parseLine(line));
+  }
+  return diagrams.filter((d) => d.length > 0);
+}
+
+function parseLine(line) {
+  const tokens = line.split(/\s+/);
+  const type = tokens.shift().toLowerCase();
+  const args = [];
+  const points = [];
+  for (const tok of tokens) {
+    const eq = tok.indexOf("=");
+    if (eq > 0) {
+      args.push([tok.slice(0, eq).toLowerCase(), tok.slice(eq + 1)]);
+    } else if (/^-?[\d.]+,-?[\d.]+$/.test(tok)) {
+      const [x, y] = tok.split(",").map(Number);
+      points.push({ x, y });
+    } else {
+      args.push([tok.toLowerCase(), true]); // bare word = flag
+    }
+  }
+  return { type, args, points, raw: line };
+}
+
+// Builds one diagram's shapes. Unknown keys are collected rather than thrown, so a
+// nearly-right spec still draws something and says what it ignored.
+function buildDiagram(items) {
+  const shapes = [];
+  const warnings = [];
+  for (const item of items) {
+    try {
+      const shape = buildShape(item, warnings);
+      if (shape) shapes.push(shape);
+      else warnings.push(`Unknown shape "${item.type}" -- ${SHAPE_LIST}`);
+    } catch (err) {
+      warnings.push(`${item.raw} -- ${err.message}`);
+    }
+  }
+  return { shapes, warnings };
+}
+
+const SHAPE_LIST = "try triangle, rect, para, polygon, circle, sector, prism, parallel or path";
+
+function buildShape(item, warnings) {
+  const { type, args, points } = item;
+  const note = (key) => warnings.push(`Ignored "${key}" on ${type}`);
+
+  if (type === "triangle") return buildTriangle(args, note);
+  if (type === "rect" || type === "rectangle" || type === "square") return buildQuad(args, note, "rectangle", type === "square");
+  if (type === "para" || type === "parallelogram") return buildQuad(args, note, "parallelogram", false);
+  if (type === "polygon" || type === "pentagon" || type === "hexagon" || type === "octagon") {
+    return buildPolygon(type, args, note);
+  }
+  if (type === "circle" || type === "sector" || type === "arc") return buildCircle(type, args, note);
+  if (type === "prism") return buildPrism(args, note);
+  if (type === "parallel" || type === "lines") return buildParallel(args, note);
+  if (type === "path" || type === "shape") return buildPath(points, args, note);
+  return null;
+}
+
+// --- per-shape builders ---------------------------------------------------
+//
+// Args are applied in written order, because order is meaningful: "a=80 b=80 ab=6"
+// locks two angles and then scales to the side, which is a different (and correct)
+// construction from doing it the other way round.
+
+function buildTriangle(args, note) {
+  const t = new Triangle({});
+  const ANGLES = { a: 0, b: 1, c: 2 };
+  const SIDES = { ab: 0, bc: 1, ca: 2 };
+  for (const [key, value] of args) {
+    if (key in ANGLES) t.setField(`angle-${ANGLES[key]}`, value);
+    else if (key in SIDES) t.setField(`side-${SIDES[key]}`, value);
+    else if (key === "labels") splitList(value).forEach((l, i) => t.setField(`label-${i}`, l));
+    else if (key === "ext") for (const which of splitList(value)) t.setField(`ext-toggle-${vertexIndex(which, t.labels)}`, true);
+    else if (key === "seg") {
+      t.setField("cevian-toggle", true);
+      if (value !== true) t.setField("cevian-t", value);
+    } else if (key === "fill") t.setField("fill", value);
+    else note(key);
+  }
+  return t;
+}
+
+function buildQuad(args, note, mode, isSquare) {
+  const q = new Quadrilateral({ mode });
+  if (mode === "parallelogram") q.setField("mode-parallelogram", true);
+  for (const [key, value] of args) {
+    if (key === "w" || key === "width" || key === "base") q.setField("base", value);
+    else if (key === "h" || key === "height" || key === "side") {
+      // On a parallelogram a bare `height` flag shows the perpendicular height, while
+      // `height=4` sets it; on a rectangle the two are the same measurement.
+      if (value === true) q.setField("show-height", true);
+      else if (key === "height" && mode === "parallelogram") q.setField("height", value);
+      else q.setField("side", value);
+    } else if (key === "angle") q.setField("angle", value);
+    else if (key === "rot" || key === "rotation") q.setField("rotation", value);
+    else if (key === "labels") q.setField("show-labels", value !== "off");
+    else if (key === "arrows") q.setField("dimension-style", value !== "off");
+    else if (key === "fill") q.setField("fill", value);
+    else note(key);
+  }
+  if (isSquare) q.setField("side", round1(q.baseUnits()));
+  return q;
+}
+
+function buildPolygon(type, args, note) {
+  const preset = { pentagon: 5, hexagon: 6, octagon: 8 }[type];
+  const p = new RegularPolygon({});
+  if (preset) p.setField("sides", preset);
+  for (const [key, value] of args) {
+    if (key === "n" || key === "sides") p.setField("sides", value);
+    else if (key === "side") p.setField("side", value);
+    else if (key === "r" || key === "radius") p.setField("radius", value);
+    else if (key === "rot" || key === "rotation") p.setField("rotation", value);
+    else if (key === "labels") p.setField("show-labels", value !== "off");
+    else if (key === "mark" || key === "angle") p.setField("show-interior", value !== "off");
+    else if (key === "ticks") p.setField("show-ticks", value !== "off");
+    else if (key === "fill") p.setField("fill", value);
+    else note(key);
+  }
+  return p;
+}
+
+function buildCircle(type, args, note) {
+  const c = new Circle({});
+  if (type === "sector") c.setField("mode-sector", true);
+  if (type === "arc") c.setField("mode-arc", true);
+  for (const [key, value] of args) {
+    if (key === "r" || key === "radius") {
+      if (value === true) c.setField("show-radius", true);
+      else c.setField("radius", value);
+    } else if (key === "d" || key === "diameter") c.setField("as-diameter", value !== "off");
+    else if (key === "angle") c.setField("angle", value);
+    else if (key === "arc") {
+      if (value !== true) c.setField("arc", value);
+    } else if (key === "fill") c.setField("fill", value);
+    else note(key);
+  }
+  return c;
+}
+
+const PRISM_BASES = { rect: "rectangle", rectangle: "rectangle", tri: "triangle", triangle: "triangle", para: "parallelogram", parallelogram: "parallelogram", poly: "polygon", polygon: "polygon" };
+
+function buildPrism(args, note) {
+  const p = new Prism({});
+  // The base has to be settled first: which measurements even exist depends on it.
+  const baseArg = args.find(([k]) => k === "base");
+  if (baseArg) {
+    const kind = PRISM_BASES[String(baseArg[1]).toLowerCase()];
+    if (!kind) throw new Error(`unknown base "${baseArg[1]}" -- use rect, tri, para or poly`);
+    p.setField(`base-${kind}`, true);
+  }
+  for (const [key, value] of args) {
+    if (key === "base") continue;
+    else if (key === "w" || key === "width") p.setField("width", value);
+    else if (key === "h") p.setField("height", value);
+    else if (key === "height") {
+      if (value === true) p.setField("show-apex-height", true);
+      else p.setField("height", value);
+    } else if (key === "depth" || key === "d") p.setField("depth", value);
+    else if (key === "angle") p.setField("slant", value);
+    else if (key === "n" || key === "sides") p.setField("sides", value);
+    else if (key === "side") p.setField("side", value);
+    else if (key === "r" || key === "radius") p.setField("radius", value);
+    else if (key === "da" || key === "view") p.setField("depth-angle", value);
+    else if (key === "hidden") p.setField("hidden-edges", value !== "off");
+    else if (key === "fill") p.setField("fill", value);
+    else note(key);
+  }
+  return p;
+}
+
+function buildParallel(args, note) {
+  const pl = new ParallelLines({});
+  for (const [key, value] of args) {
+    if (key === "angle") pl.setField("trans-angle-0", value);
+    else if (key === "angle2") pl.setField("trans-angle-1", value);
+    else if (key === "dir" || key === "direction") pl.setField("line-angle", value);
+    else if (key === "gap") pl.setField("gap", value);
+    else if (key === "lines") pl.setField("add-line", Number(value) >= 3);
+    else if (key === "transversals" || key === "trans") pl.setField("add-transversal", Number(value) >= 2);
+    else note(key);
+  }
+  return pl;
+}
+
+// `path 0,0 6,0 6,3 3,3 3,5 0,5 close fill=cream` -- the irregular composite outlines
+// that area questions are built from. Coordinates are in units with y pointing up,
+// which is how they'd be read off a question, not screen-down.
+function buildPath(points, args, note) {
+  if (points.length < 2) throw new Error("path needs at least two x,y points");
+  const g = new LineGraph({});
+  let closed = false;
+  let fill = null;
+  let showAngles = false;
+  let showMarks = false;
+  for (const [key, value] of args) {
+    if (key === "close" || key === "closed") closed = value !== "off";
+    else if (key === "fill") fill = value;
+    else if (key === "angles") showAngles = value !== "off";
+    else if (key === "marks") showMarks = value !== "off";
+    else note(key);
+  }
+  // On an outline every horizontal side is parallel to every other one, so the
+  // chevron/tick notation fires everywhere and buries the measurements.
+  g.showParallelMarks = showMarks;
+  g.showEqualMarks = showMarks;
+  g.buildPath(
+    points.map((p) => ({ x: ORIGIN.x + p.x * PX_PER_UNIT, y: ORIGIN.y - p.y * PX_PER_UNIT })),
+    { closed: closed || fill !== null }
+  );
+  if (fill) g.fillAllCycles(fill);
+  // An outline's corners are nearly always right angles; labelling all of them buries
+  // the side lengths, so they start hidden unless the spec asks for them.
+  if (!showAngles) g.hideAllAngles();
+  return g;
+}
+
+function splitList(value) {
+  return String(value).split(/[,/]/).map((s) => s.trim()).filter(Boolean);
+}
+
+function vertexIndex(which, labels) {
+  const asNumber = Number(which);
+  if (Number.isFinite(asNumber)) return Math.max(0, Math.min(2, asNumber - 1));
+  const found = labels.findIndex((l) => l.toLowerCase() === String(which).toLowerCase());
+  return found >= 0 ? found : 0;
+}
+
+// --- the other direction: shapes back to spec text ------------------------
+//
+// So a diagram built by hand in the app can be copied back out as a line a chat can
+// reuse or tweak, instead of being a dead end.
+
+// Renders the flags that are switched on, so a diagram styled in the app comes back
+// out looking the same rather than reset to defaults.
+function flags(map) {
+  const on = Object.entries(map)
+    .filter(([, isOn]) => isOn)
+    .map(([word]) => word);
+  return on.length ? ` ${on.join(" ")}` : "";
+}
+
+function shapeToSpecLine(shape) {
+  const n = (v) => round1(v);
+  if (shape.type === "triangle") {
+    const a = shape.angles();
+    const s = shape.sides().map((px) => px / PX_PER_UNIT);
+    return `triangle a=${n(a[0])} b=${n(a[1])} ab=${n(s[0])} fill=${shape.fillId}`;
+  }
+  if (shape.type === "quadrilateral") {
+    const kind = shape.mode === "rectangle" ? "rect" : "para";
+    const angle = shape.mode === "parallelogram" ? ` angle=${n(shape.slantDeg)}` : "";
+    return `${kind} w=${n(shape.baseUnits())} h=${n(shape.sideUnits())}${angle}${flags({
+      height: shape.showHeight,
+      labels: shape.showLabels,
+      "arrows=off": !shape.dimensionStyle,
+    })} fill=${shape.fillId}`;
+  }
+  if (shape.type === "polygon") {
+    return `polygon n=${shape.sides} side=${n(shape.sideUnits())}${flags({
+      mark: shape.showInteriorAngle,
+      labels: shape.showLabels,
+      "ticks=off": !shape.showTicks,
+    })} fill=${shape.fillId}`;
+  }
+  if (shape.type === "circle") {
+    const kind = shape.mode === "circle" ? "circle" : shape.mode;
+    const sweep = shape.mode === "circle" ? "" : ` angle=${n(shape.sweepDeg)}`;
+    return `${kind} r=${n(shape.radiusUnits())}${sweep} fill=${shape.fillId}`;
+  }
+  if (shape.type === "prism") {
+    const kindWord = { rectangle: "rect", triangle: "tri", parallelogram: "para", polygon: "poly", custom: "custom" }[shape.baseKind];
+    if (shape.baseKind === "custom") return `# (custom-outline prism -- rebuild from its 2D shape, then "Turn into prism")`;
+    const size =
+      shape.baseKind === "polygon"
+        ? `n=${shape.sides} side=${n(shape.baseSideUnits())}`
+        : `w=${n(shape.widthUnits())} h=${n(shape.heightUnits())}`;
+    const slant = shape.baseKind === "parallelogram" ? ` angle=${n(shape.slantDeg)}` : "";
+    const hidden = shape.showHiddenEdges ? " hidden" : "";
+    return `prism base=${kindWord} ${size}${slant} depth=${n(shape.depthUnits())}${hidden} fill=${shape.fillId}`;
+  }
+  if (shape.type === "parallel-lines") {
+    return `parallel angle=${n(shape.transversals[0].relAngleDeg)} lines=${shape.lineCount} transversals=${shape.transversals.length}`;
+  }
+  if (shape.type === "line-graph") {
+    // Only a single open or closed chain round-trips as a path; anything branchier is
+    // still perfectly usable in the app, it just can't be written as one line.
+    const chain = shape.asChain?.();
+    if (!chain) return `# (freeform line diagram -- no single-path spec for this one)`;
+    const pts = chain.points
+      .map((p) => `${n((p.x - ORIGIN.x) / PX_PER_UNIT)},${n((ORIGIN.y - p.y) / PX_PER_UNIT)}`)
+      .join(" ");
+    return `path ${pts}${chain.closed ? " close" : ""}`;
+  }
+  return `# (${shape.type} has no spec form yet)`;
+}
+
+function diagramToSpec(shapes) {
+  return shapes.map(shapeToSpecLine).join("\n");
+}
+return { parseSpec, buildDiagram, shapeToSpecLine, diagramToSpec };
+})();
+
+// --- js/aiCard.js ---
+const { AI_CARD } = (function () {
+// The single source of truth for the instructions given to an AI assistant. The build
+// script writes this out as AI-INSTRUCTIONS.md (to paste into a Claude Project) and as
+// a SKILL.md (to upload as a Claude Skill), and the app shows it behind the "For AI"
+// button so it can be copied without leaving the page.
+//
+// Keep it short on purpose: the whole point is that a chat loads ~700 tokens of this
+// instead of ~55,000 tokens of application HTML.
+
+const AI_CARD = `# Geometry diagram specs
+
+A diagram tool for maths worksheets (triangles, polygons, circles, prisms, parallel
+lines, composite outlines). You write ONE LINE per diagram; the tool solves the real
+geometry and the teacher exports PNG/SVG straight into Word.
+
+**Never rebuild this tool as an artifact and never fetch or read its HTML.** Writing a
+spec line is all that is needed, and costs a fraction as much.
+
+## Handing a diagram over
+
+- If the teacher has the tool open: give them the spec lines to paste into "Spec...".
+- Otherwise give them a link with the spec URL-encoded after \`#spec=\`:
+  \`https://elliotttheeducator.github.io/Maths-Geometry-Diagram-Creator/#spec=triangle%20a%3D80%20b%3D80%20ab%3D6\`
+  Opening it draws the diagram straight away. (Links only work on that hosted address;
+  inside a Claude artifact preview, paste into the Spec box instead.)
+
+## Grammar
+
+One shape per line. \`---\` alone on a line starts a new diagram. \`#\` starts a comment.
+Lengths are in units, angles in degrees. Bare words are flags; \`key=value\` sets a value.
+
+| Shape | Keys |
+|---|---|
+| \`triangle\` | \`a= b= c=\` angles at vertices 1/2/3, \`ab= bc= ca=\` sides, \`labels=P,Q,R\`, \`ext=A\` exterior angle, \`seg\` or \`seg=0.6\` internal parallel segment |
+| \`rect\` | \`w= h=\`, \`labels\`, \`arrows=off\`, \`rot=\` |
+| \`para\` | \`w= h= angle=\`, \`height\` (draw perpendicular height) or \`height=4\` (set it), \`rot=\` |
+| \`polygon\` | \`n= side=\` or \`r=\`, \`mark\` (interior angle), \`labels\`, \`ticks=off\`, \`rot=\` |
+| \`pentagon\` \`hexagon\` \`octagon\` | same as polygon with \`n\` preset |
+| \`circle\` | \`r=\`, \`d\` (label as diameter), \`radius\` (draw the radius line) |
+| \`sector\` | \`r= angle=\`, \`arc=\` (set arc length), \`radius\` |
+| \`arc\` | \`r= angle=\` |
+| \`prism\` | \`base=rect\\|tri\\|para\\|poly\`, \`w= h= depth=\`, \`angle=\` (para base), \`n= side=\` (poly base), \`hidden\` (hidden edges), \`height\` (perp height, tri base), \`da=\` (viewing angle) |
+| \`parallel\` | \`angle=\` transversal angle, \`dir=\`, \`gap=\`, \`lines=3\`, \`transversals=2\` |
+| \`path\` | \`x,y x,y x,y ...\` then \`close\`, for composite/L-shaped outlines. y points UP. Corner angles and parallel/equal marks start hidden; add \`angles\` or \`marks\` to show them. |
+
+Every shape also takes \`fill=\` one of \`cream green blue rose violet amber slate none\`.
+
+## Things worth knowing
+
+- Two angles plus one side fully determines a triangle, and typed values lock, so
+  \`triangle a=80 b=80 ab=6\` really is isosceles -- the third angle follows and stays 20.
+- Anything unspecified keeps a sensible default; unknown keys are reported, not fatal.
+- Every quoted number is measured off the actual drawing, so a diagram is never
+  labelled with something its geometry doesn't support.
+- To mark a length as unknown (\`x\`) or hide it, the teacher clicks the label in the app.
+
+## Examples
+
+\`\`\`
+triangle a=90 b=35 ab=8              # right-angled, 35 deg at B
+triangle a=80 b=80 ab=6 fill=blue    # isosceles
+rect w=12 h=7 fill=cream             # area / perimeter
+para w=9 h=5 angle=60 height         # parallelogram with perpendicular height
+polygon n=8 side=4 mark labels       # regular octagon, interior angle marked
+circle r=6.5 d                       # circle labelled by its diameter
+sector r=5 angle=120 arc=            # sector showing its arc length
+prism base=rect w=8 h=4 depth=12 hidden
+prism base=poly n=6 side=3 depth=10 hidden
+parallel angle=115 lines=3 transversals=2
+path 0,0 10,0 10,4 6,4 6,7 0,7 close fill=cream   # L-shaped composite
+\`\`\`
+
+## A whole worksheet at once
+
+Separate diagrams with \`---\`. The tool renders them as a grid, with Copy and Save per
+diagram and "Save all" for a zip of every PNG at once:
+
+\`\`\`
+rect w=10 h=6 fill=cream
+---
+triangle a=90 b=30 ab=7 fill=blue
+---
+prism base=tri w=6 h=4 depth=9 hidden
+\`\`\`
+`;
+return { AI_CARD };
+})();
+
+// --- js/specPanel.js ---
+const { renderDiagramToSvg, disposeRenderedSvgs, closeSpecPanel, openSpecPanel } = (function () {
+const NS = "http://www.w3.org/2000/svg";
+const SHEET_PADDING = 24;
+
+// Nothing in a spec-rendered diagram is interactive, so the shapes get a controller
+// that satisfies the interface and does nothing.
+const STATIC_CONTROLLER = {
+  onSelect() {},
+  onChange() {},
+  onInlineEdit() {},
+  snapNudge() {
+    return null;
+  },
+};
+
+let offscreenHost = null;
+
+function host() {
+  if (!offscreenHost) {
+    offscreenHost = document.createElement("div");
+    offscreenHost.style.cssText = "position:fixed;left:-99999px;top:0;width:1200px;height:900px;";
+    document.body.appendChild(offscreenHost);
+  }
+  return offscreenHost;
+}
+
+// Renders one diagram's spec into its own standalone SVG, cropped to its content.
+// It has to be in the document (offscreen) because getBBox() needs a live layout.
+function renderDiagramToSvg(items) {
+  const svgEl = document.createElementNS(NS, "svg");
+  svgEl.setAttribute("xmlns", NS);
+  svgEl.setAttribute("viewBox", "0 0 1000 700");
+  const layer = document.createElementNS(NS, "g");
+  layer.setAttribute("class", "shapes-layer");
+  svgEl.appendChild(layer);
+  host().appendChild(svgEl);
+
+  const { shapes, warnings } = buildDiagram(items);
+  for (const shape of shapes) shape.mount(layer, STATIC_CONTROLLER);
+
+  let box = null;
+  try {
+    box = layer.getBBox();
+  } catch {
+    box = null;
+  }
+  if (box && box.width > 0 && box.height > 0) {
+    svgEl.setAttribute(
+      "viewBox",
+      `${box.x - SHEET_PADDING} ${box.y - SHEET_PADDING} ${box.width + SHEET_PADDING * 2} ${
+        box.height + SHEET_PADDING * 2
+      }`
+    );
+  }
+  return { svgEl, shapes, warnings };
+}
+
+function disposeRenderedSvgs(entries) {
+  for (const e of entries) e.svgEl.remove();
+}
+
+// --- the Spec dialog ------------------------------------------------------
+
+let overlayEl = null;
+
+function closeSpecPanel() {
+  if (overlayEl) {
+    overlayEl.remove();
+    overlayEl = null;
+  }
+}
+
+function openSpecPanel({ currentShapes, onLoadDiagram, initialText }) {
+  closeSpecPanel();
+  const overlay = document.createElement("div");
+  overlay.className = "export-modal-overlay";
+  overlay.addEventListener("click", (e) => {
+    if (e.target === overlay) closeSpecPanel();
+  });
+
+  const panel = document.createElement("div");
+  panel.className = "export-modal spec-modal";
+
+  const title = document.createElement("h3");
+  title.textContent = "Diagram spec";
+  panel.appendChild(title);
+
+  const hint = document.createElement("p");
+  hint.className = "export-hint";
+  hint.textContent =
+    'One shape per line, "---" between diagrams. Ask Claude for spec lines rather than for a whole diagram tool -- "For AI" below is the page to give it.';
+  panel.appendChild(hint);
+
+  const textarea = document.createElement("textarea");
+  textarea.className = "spec-input";
+  textarea.spellcheck = false;
+  textarea.rows = 10;
+  textarea.placeholder = "triangle a=80 b=80 ab=6 fill=cream\n---\nprism base=poly n=6 side=3 depth=10 hidden";
+  textarea.value = initialText || (currentShapes.length ? diagramToSpec(currentShapes) : "");
+  panel.appendChild(textarea);
+
+  const messages = document.createElement("p");
+  messages.className = "spec-messages";
+  panel.appendChild(messages);
+
+  const actions = document.createElement("div");
+  actions.className = "export-actions";
+  const statusEl = document.createElement("span");
+  statusEl.className = "export-status";
+  const flash = (msg) => {
+    statusEl.textContent = msg;
+    setTimeout(() => {
+      statusEl.textContent = "";
+    }, 2500);
+  };
+
+  const drawBtn = document.createElement("button");
+  drawBtn.className = "primary";
+  drawBtn.textContent = "Draw";
+  drawBtn.addEventListener("click", () => {
+    const diagrams = parseSpec(textarea.value);
+    if (!diagrams.length) {
+      messages.textContent = "Nothing to draw yet.";
+      return;
+    }
+    if (diagrams.length === 1) {
+      const warnings = onLoadDiagram(diagrams[0]);
+      messages.textContent = warnings.join("  ·  ");
+      if (!warnings.length) closeSpecPanel();
+      return;
+    }
+    // More than one diagram: render them all and go straight to the export sheet.
+    const entries = diagrams.map((d, i) => ({ ...renderDiagramToSvg(d), name: `diagram-${i + 1}` }));
+    const allWarnings = entries.flatMap((e) => e.warnings);
+    messages.textContent = allWarnings.join("  ·  ");
+    closeSpecPanel();
+    exportSheet(entries, {
+      onOpen: (index) => {
+        disposeRenderedSvgs(entries);
+        onLoadDiagram(diagrams[index]);
+      },
+    });
+  });
+  actions.appendChild(drawBtn);
+
+  const copyBtn = document.createElement("button");
+  copyBtn.textContent = "Copy spec";
+  copyBtn.addEventListener("click", async () => {
+    try {
+      await navigator.clipboard.writeText(textarea.value);
+      flash("Copied.");
+    } catch {
+      flash("Copy failed -- select the text instead.");
+    }
+  });
+  actions.appendChild(copyBtn);
+
+  const linkBtn = document.createElement("button");
+  linkBtn.textContent = "Copy link";
+  linkBtn.title = "A link that opens this spec already drawn";
+  linkBtn.addEventListener("click", async () => {
+    const base = location.href.split("#")[0];
+    try {
+      await navigator.clipboard.writeText(`${base}#spec=${encodeURIComponent(textarea.value)}`);
+      flash("Link copied.");
+    } catch {
+      flash("Copy failed.");
+    }
+  });
+  actions.appendChild(linkBtn);
+
+  const aiBtn = document.createElement("button");
+  aiBtn.textContent = "For AI";
+  aiBtn.title = "The page to paste into a Claude Project so chats can write specs";
+  aiBtn.addEventListener("click", () => openAiCard());
+  actions.appendChild(aiBtn);
+
+  const closeBtn = document.createElement("button");
+  closeBtn.textContent = "Close";
+  closeBtn.addEventListener("click", closeSpecPanel);
+  actions.appendChild(closeBtn);
+  actions.appendChild(statusEl);
+  panel.appendChild(actions);
+
+  overlay.appendChild(panel);
+  document.body.appendChild(overlay);
+  overlayEl = overlay;
+  textarea.focus();
+}
+
+function openAiCard() {
+  closeSpecPanel();
+  const overlay = document.createElement("div");
+  overlay.className = "export-modal-overlay";
+  overlay.addEventListener("click", (e) => {
+    if (e.target === overlay) closeSpecPanel();
+  });
+
+  const panel = document.createElement("div");
+  panel.className = "export-modal spec-modal";
+
+  const title = document.createElement("h3");
+  title.textContent = "Instructions for AI";
+  panel.appendChild(title);
+
+  const hint = document.createElement("p");
+  hint.className = "export-hint";
+  hint.textContent =
+    "Paste this into a Claude Project's custom instructions (or upload it as a Skill). Chats then write one-line specs instead of rebuilding the tool -- far faster and far cheaper.";
+  panel.appendChild(hint);
+
+  const pre = document.createElement("textarea");
+  pre.className = "spec-input ai-card";
+  pre.readOnly = true;
+  pre.rows = 18;
+  pre.value = AI_CARD;
+  panel.appendChild(pre);
+
+  const actions = document.createElement("div");
+  actions.className = "export-actions";
+  const statusEl = document.createElement("span");
+  statusEl.className = "export-status";
+  const copyBtn = document.createElement("button");
+  copyBtn.className = "primary";
+  copyBtn.textContent = "Copy instructions";
+  copyBtn.addEventListener("click", async () => {
+    try {
+      await navigator.clipboard.writeText(AI_CARD);
+      statusEl.textContent = "Copied.";
+    } catch {
+      pre.select();
+      statusEl.textContent = "Selected -- press Ctrl/Cmd+C.";
+    }
+    setTimeout(() => {
+      statusEl.textContent = "";
+    }, 2500);
+  });
+  actions.appendChild(copyBtn);
+  const closeBtn = document.createElement("button");
+  closeBtn.textContent = "Close";
+  closeBtn.addEventListener("click", closeSpecPanel);
+  actions.appendChild(closeBtn);
+  actions.appendChild(statusEl);
+  panel.appendChild(actions);
+
+  overlay.appendChild(panel);
+  document.body.appendChild(overlay);
+  overlayEl = overlay;
+}
+return { renderDiagramToSvg, disposeRenderedSvgs, closeSpecPanel, openSpecPanel };
+})();
+
 // --- js/app.js ---
 const svg = document.getElementById("canvas");
 const layer = document.getElementById("shapes-layer");
@@ -5615,6 +6769,7 @@ const exportSvgBtn = document.getElementById("export-svg");
 const exportPngBtn = document.getElementById("export-png");
 const gridToggle = document.getElementById("toggle-grid");
 const snapToggle = document.getElementById("toggle-snap");
+const specBtn = document.getElementById("open-spec");
 
 let shapes = [];
 let selectedShape = null;
@@ -5860,6 +7015,64 @@ gridToggle.addEventListener("change", () => {
 exportSvgBtn.addEventListener("click", () => exportSvg(svg));
 exportPngBtn.addEventListener("click", () => exportPng(svg));
 
+// --- written specs --------------------------------------------------------
+//
+// The whole diagram can be written down as a few words per shape and rebuilt from
+// them, which is what lets an AI assistant produce worksheets for this tool without
+// reading (or regenerating) the application itself.
+
+function clearCanvas() {
+  for (const shape of shapes) shape.destroy();
+  shapes = [];
+  deselectAll();
+}
+
+// Loads one diagram into the live canvas, replacing what's there, and returns any
+// warnings so the caller can show what it couldn't make sense of.
+function loadDiagram(items) {
+  const { shapes: built, warnings } = buildDiagram(items);
+  if (!built.length) return warnings.length ? warnings : ["Nothing recognisable in that spec."];
+  clearCanvas();
+  for (const shape of built) {
+    shapes.push(shape);
+    shape.mount(layer, controller);
+  }
+  selectShape(built[built.length - 1]);
+  return warnings;
+}
+
+specBtn.addEventListener("click", () =>
+  openSpecPanel({ currentShapes: shapes, onLoadDiagram: loadDiagram })
+);
+
+// `#spec=...` draws a spec on load, so a chat can hand over a link that opens the
+// finished diagram rather than instructions for building it.
+function loadSpecFromHash() {
+  const match = /[#&]spec=([^&]*)/.exec(location.hash);
+  if (!match) return;
+  let text;
+  try {
+    text = decodeURIComponent(match[1].replace(/\+/g, " "));
+  } catch {
+    return;
+  }
+  const diagrams = parseSpec(text);
+  if (!diagrams.length) return;
+  if (diagrams.length === 1) {
+    loadDiagram(diagrams[0]);
+    return;
+  }
+  const entries = diagrams.map((d, i) => ({ ...renderDiagramToSvg(d), name: `diagram-${i + 1}` }));
+  exportSheet(entries, {
+    onOpen: (index) => {
+      disposeRenderedSvgs(entries);
+      loadDiagram(diagrams[index]);
+    },
+  });
+}
+
+window.addEventListener("hashchange", loadSpecFromHash);
+
 document.addEventListener("keydown", (e) => {
   if ((e.key === "Delete" || e.key === "Backspace") && selectedShape) {
     const active = document.activeElement;
@@ -5917,5 +7130,6 @@ function openInlineEditor(shape, fieldKey, currentValue, evt) {
 }
 
 refreshSidebar();
+loadSpecFromHash();
 })();
 </script>

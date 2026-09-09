@@ -35,6 +35,11 @@ export class LineGraph {
     this.angleLocks = {}; // vertex-junction pairKey -> locked degree value
     this.angleOverrides = {}; // any-junction pairKey -> display override ("" = hidden)
     this.fillColors = {}; // cycleKey -> pastel hex or "none"
+    // Chevrons and ticks are the point of a hand-built angle diagram, but on a
+    // composite outline (where every horizontal side is parallel to every other)
+    // they're just noise -- so they can be switched off per diagram.
+    this.showParallelMarks = true;
+    this.showEqualMarks = true;
     this._spawnCount = 0;
     this._vertexCount = 0;
     this._idCount = 0;
@@ -75,6 +80,83 @@ export class LineGraph {
     return this.segments.filter((s) => s.aId === vertexId || s.bId === vertexId);
   }
 
+  connect(a, b) {
+    const seg = {
+      id: this.nextSegmentId(),
+      aId: a.id,
+      bId: b.id,
+      color: DEFAULT_COLOR,
+      lengthLocked: false,
+      lengthLockUnits: null,
+      lengthOverride: undefined,
+    };
+    this.segments.push(seg);
+    return seg;
+  }
+
+  // Builds a whole outline in one go from explicit points -- what a written spec
+  // (`path 0,0 6,0 6,3 ...`) turns into, and the quickest route to the irregular
+  // composite figures that area questions are built from.
+  buildPath(points, { closed = false } = {}) {
+    const vs = points.map((p) => this.addVertex(p.x, p.y));
+    for (let i = 0; i < vs.length - 1; i++) this.connect(vs[i], vs[i + 1]);
+    if (closed && vs.length > 2) this.connect(vs[vs.length - 1], vs[0]);
+    this.notifyChange();
+    return vs;
+  }
+
+  // The inverse of buildPath: if this graph happens to be one simple chain (every
+  // vertex meeting one or two segments, all of it connected), return its points in
+  // order so it can be written back out as a `path` line. Anything branchier has no
+  // single-path form, and says so rather than emitting something wrong.
+  asChain() {
+    if (this.segments.length === 0) return null;
+    const neighbours = new Map(this.vertices.map((v) => [v.id, []]));
+    for (const s of this.segments) {
+      if (!neighbours.has(s.aId) || !neighbours.has(s.bId)) return null;
+      neighbours.get(s.aId).push(s.bId);
+      neighbours.get(s.bId).push(s.aId);
+    }
+    const degrees = [...neighbours.values()].map((list) => list.length);
+    if (degrees.some((d) => d < 1 || d > 2)) return null;
+
+    const ends = [...neighbours.entries()].filter(([, list]) => list.length === 1).map(([id]) => id);
+    const closed = ends.length === 0;
+    if (!closed && ends.length !== 2) return null;
+
+    const startId = closed ? this.vertices[0].id : ends[0];
+    const order = [startId];
+    let prev = null;
+    let current = startId;
+    while (true) {
+      const next = neighbours.get(current).find((id) => id !== prev);
+      if (next === undefined || next === startId) break;
+      order.push(next);
+      prev = current;
+      current = next;
+    }
+    if (order.length !== this.vertices.length) return null; // disconnected pieces
+    return { points: order.map((id) => this.getVertex(id)), closed };
+  }
+
+  // Hides every angle label at once. A composite outline is usually all right angles,
+  // and labelling each of them buries the side lengths the question is actually about;
+  // the marks themselves stay, and any angle can be brought back by clicking its plus.
+  hideAllAngles() {
+    for (const junction of this.computeJunctions()) {
+      for (const { r1, r2 } of this.anglePairsForJunction(junction)) {
+        this.angleOverrides[[r1.rayId, r2.rayId].sort().join("|")] = "";
+      }
+    }
+    this.notifyChange();
+  }
+
+  // Fills every closed loop the path encloses -- the usual intent for a spec'd outline.
+  fillAllCycles(paletteId) {
+    for (const cycle of this.findCycles()) this.fillColors[this.cycleKey(cycle)] = paletteId;
+    this.notifyChange();
+  }
+
   // Adds a brand new, disconnected 2-point segment. If `fromVertexId` is given,
   // it "sprouts" a new connected segment from that existing vertex instead.
   addSegment(fromVertexId) {
@@ -87,16 +169,7 @@ export class LineGraph {
       a = this.addVertex(420 + o, 330 + o);
     }
     const b = this.addVertex(a.x + 160, a.y + o * 0 - 10);
-    const seg = {
-      id: this.nextSegmentId(),
-      aId: a.id,
-      bId: b.id,
-      color: DEFAULT_COLOR,
-      lengthLocked: false,
-      lengthLockUnits: null,
-      lengthOverride: undefined,
-    };
-    this.segments.push(seg);
+    const seg = this.connect(a, b);
     this.notifyChange();
     return seg;
   }
@@ -505,6 +578,21 @@ export class LineGraph {
       });
     }
 
+    fields.push({
+      key: "marks-parallel",
+      group: "Marks",
+      label: "Parallel chevrons",
+      kind: "toggle",
+      value: this.showParallelMarks,
+    });
+    fields.push({
+      key: "marks-equal",
+      group: "Marks",
+      label: "Equal-length ticks",
+      kind: "toggle",
+      value: this.showEqualMarks,
+    });
+
     return fields;
   }
 
@@ -521,6 +609,16 @@ export class LineGraph {
   }
 
   setField(key, value) {
+    if (key === "marks-parallel") {
+      this.showParallelMarks = Boolean(value);
+      this.notifyChange();
+      return;
+    }
+    if (key === "marks-equal") {
+      this.showEqualMarks = Boolean(value);
+      this.notifyChange();
+      return;
+    }
     if (key.startsWith("vlabel:")) {
       const vId = key.slice(7);
       const parsed = parseFieldInput(value);
@@ -721,12 +819,12 @@ export class LineGraph {
       const mid = midpoint(A, B);
 
       const dirGroup = dirGroups[i];
-      if (dirGroup.size >= 2) {
+      if (this.showParallelMarks && dirGroup.size >= 2) {
         const pos = { x: mid.x - dir.x * 16, y: mid.y - dir.y * 16 };
         container.appendChild(this.drawChevronMarks(pos, dir, Math.min(dirGroup.index + 1, 3)));
       }
       const lenGroup = lenGroups[i];
-      if (lenGroup.size >= 2) {
+      if (this.showEqualMarks && lenGroup.size >= 2) {
         const pos = { x: mid.x + dir.x * 16, y: mid.y + dir.y * 16 };
         container.appendChild(this.drawTickMarks(pos, dir, Math.min(lenGroup.index + 1, 3)));
       }

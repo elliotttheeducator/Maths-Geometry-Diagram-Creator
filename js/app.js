@@ -6,7 +6,9 @@ import { Quadrilateral } from "./shapes/quadrilateral.js";
 import { Prism } from "./shapes/prism.js";
 import { RegularPolygon } from "./shapes/polygon.js";
 import { renderSidebar } from "./sidebar.js";
-import { exportSvg, exportPng } from "./export.js";
+import { exportSvg, exportPng, exportSheet } from "./export.js";
+import { parseSpec, buildDiagram } from "./spec.js";
+import { openSpecPanel, renderDiagramToSvg, disposeRenderedSvgs } from "./specPanel.js";
 
 const svg = document.getElementById("canvas");
 const layer = document.getElementById("shapes-layer");
@@ -27,6 +29,7 @@ const exportSvgBtn = document.getElementById("export-svg");
 const exportPngBtn = document.getElementById("export-png");
 const gridToggle = document.getElementById("toggle-grid");
 const snapToggle = document.getElementById("toggle-snap");
+const specBtn = document.getElementById("open-spec");
 
 let shapes = [];
 let selectedShape = null;
@@ -272,6 +275,64 @@ gridToggle.addEventListener("change", () => {
 exportSvgBtn.addEventListener("click", () => exportSvg(svg));
 exportPngBtn.addEventListener("click", () => exportPng(svg));
 
+// --- written specs --------------------------------------------------------
+//
+// The whole diagram can be written down as a few words per shape and rebuilt from
+// them, which is what lets an AI assistant produce worksheets for this tool without
+// reading (or regenerating) the application itself.
+
+function clearCanvas() {
+  for (const shape of shapes) shape.destroy();
+  shapes = [];
+  deselectAll();
+}
+
+// Loads one diagram into the live canvas, replacing what's there, and returns any
+// warnings so the caller can show what it couldn't make sense of.
+function loadDiagram(items) {
+  const { shapes: built, warnings } = buildDiagram(items);
+  if (!built.length) return warnings.length ? warnings : ["Nothing recognisable in that spec."];
+  clearCanvas();
+  for (const shape of built) {
+    shapes.push(shape);
+    shape.mount(layer, controller);
+  }
+  selectShape(built[built.length - 1]);
+  return warnings;
+}
+
+specBtn.addEventListener("click", () =>
+  openSpecPanel({ currentShapes: shapes, onLoadDiagram: loadDiagram })
+);
+
+// `#spec=...` draws a spec on load, so a chat can hand over a link that opens the
+// finished diagram rather than instructions for building it.
+function loadSpecFromHash() {
+  const match = /[#&]spec=([^&]*)/.exec(location.hash);
+  if (!match) return;
+  let text;
+  try {
+    text = decodeURIComponent(match[1].replace(/\+/g, " "));
+  } catch {
+    return;
+  }
+  const diagrams = parseSpec(text);
+  if (!diagrams.length) return;
+  if (diagrams.length === 1) {
+    loadDiagram(diagrams[0]);
+    return;
+  }
+  const entries = diagrams.map((d, i) => ({ ...renderDiagramToSvg(d), name: `diagram-${i + 1}` }));
+  exportSheet(entries, {
+    onOpen: (index) => {
+      disposeRenderedSvgs(entries);
+      loadDiagram(diagrams[index]);
+    },
+  });
+}
+
+window.addEventListener("hashchange", loadSpecFromHash);
+
 document.addEventListener("keydown", (e) => {
   if ((e.key === "Delete" || e.key === "Backspace") && selectedShape) {
     const active = document.activeElement;
@@ -329,3 +390,4 @@ function openInlineEditor(shape, fieldKey, currentValue, evt) {
 }
 
 refreshSidebar();
+loadSpecFromHash();

@@ -134,6 +134,12 @@ export class Prism {
     return this.depthPx / PX_PER_UNIT;
   }
 
+  // Side length of a regular-polygon base -- the measurement that's actually quoted
+  // in a question, where the circumradius almost never is.
+  baseSideUnits() {
+    return (2 * this.radiusPx * Math.sin(Math.PI / this.sides)) / PX_PER_UNIT;
+  }
+
   // Shoelace on the base outline -- one formula that covers every base kind,
   // including an arbitrary outline handed over from another shape.
   baseAreaUnits() {
@@ -185,6 +191,7 @@ export class Prism {
 
     if (this.baseKind === "polygon") {
       fields.push({ key: "sides", group: "Base", label: "Sides", kind: "angle", value: this.sides });
+      fields.push({ key: "side", group: "Measurements", label: "Side", kind: "length", value: val("side", this.baseSideUnits()) });
       fields.push({ key: "radius", group: "Measurements", label: "Radius", kind: "length", value: val("radius", this.radiusPx / PX_PER_UNIT) });
     } else if (this.baseKind !== "custom") {
       fields.push({ key: "width", group: "Measurements", label: "Width", kind: "length", value: val("width", this.widthUnits()) });
@@ -287,6 +294,7 @@ export class Prism {
     else if (key === "height") this.heightPx = px;
     else if (key === "depth") this.depthPx = px;
     else if (key === "radius") this.radiusPx = px;
+    else if (key === "side") this.radiusPx = px / (2 * Math.sin(Math.PI / this.sides));
     this.notifyChange();
   }
 

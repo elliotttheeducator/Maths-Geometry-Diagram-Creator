@@ -1,0 +1,84 @@
+// The single source of truth for the instructions given to an AI assistant. The build
+// script writes this out as AI-INSTRUCTIONS.md (to paste into a Claude Project) and as
+// a SKILL.md (to upload as a Claude Skill), and the app shows it behind the "For AI"
+// button so it can be copied without leaving the page.
+//
+// Keep it short on purpose: the whole point is that a chat loads ~700 tokens of this
+// instead of ~55,000 tokens of application HTML.
+
+export const AI_CARD = `# Geometry diagram specs
+
+A diagram tool for maths worksheets (triangles, polygons, circles, prisms, parallel
+lines, composite outlines). You write ONE LINE per diagram; the tool solves the real
+geometry and the teacher exports PNG/SVG straight into Word.
+
+**Never rebuild this tool as an artifact and never fetch or read its HTML.** Writing a
+spec line is all that is needed, and costs a fraction as much.
+
+## Handing a diagram over
+
+- If the teacher has the tool open: give them the spec lines to paste into "Spec...".
+- Otherwise give them a link with the spec URL-encoded after \`#spec=\`:
+  \`https://elliotttheeducator.github.io/Maths-Geometry-Diagram-Creator/#spec=triangle%20a%3D80%20b%3D80%20ab%3D6\`
+  Opening it draws the diagram straight away. (Links only work on that hosted address;
+  inside a Claude artifact preview, paste into the Spec box instead.)
+
+## Grammar
+
+One shape per line. \`---\` alone on a line starts a new diagram. \`#\` starts a comment.
+Lengths are in units, angles in degrees. Bare words are flags; \`key=value\` sets a value.
+
+| Shape | Keys |
+|---|---|
+| \`triangle\` | \`a= b= c=\` angles at vertices 1/2/3, \`ab= bc= ca=\` sides, \`labels=P,Q,R\`, \`ext=A\` exterior angle, \`seg\` or \`seg=0.6\` internal parallel segment |
+| \`rect\` | \`w= h=\`, \`labels\`, \`arrows=off\`, \`rot=\` |
+| \`para\` | \`w= h= angle=\`, \`height\` (draw perpendicular height) or \`height=4\` (set it), \`rot=\` |
+| \`polygon\` | \`n= side=\` or \`r=\`, \`mark\` (interior angle), \`labels\`, \`ticks=off\`, \`rot=\` |
+| \`pentagon\` \`hexagon\` \`octagon\` | same as polygon with \`n\` preset |
+| \`circle\` | \`r=\`, \`d\` (label as diameter), \`radius\` (draw the radius line) |
+| \`sector\` | \`r= angle=\`, \`arc=\` (set arc length), \`radius\` |
+| \`arc\` | \`r= angle=\` |
+| \`prism\` | \`base=rect\\|tri\\|para\\|poly\`, \`w= h= depth=\`, \`angle=\` (para base), \`n= side=\` (poly base), \`hidden\` (hidden edges), \`height\` (perp height, tri base), \`da=\` (viewing angle) |
+| \`parallel\` | \`angle=\` transversal angle, \`dir=\`, \`gap=\`, \`lines=3\`, \`transversals=2\` |
+| \`path\` | \`x,y x,y x,y ...\` then \`close\`, for composite/L-shaped outlines. y points UP. Corner angles and parallel/equal marks start hidden; add \`angles\` or \`marks\` to show them. |
+
+Every shape also takes \`fill=\` one of \`cream green blue rose violet amber slate none\`.
+
+## Things worth knowing
+
+- Two angles plus one side fully determines a triangle, and typed values lock, so
+  \`triangle a=80 b=80 ab=6\` really is isosceles -- the third angle follows and stays 20.
+- Anything unspecified keeps a sensible default; unknown keys are reported, not fatal.
+- Every quoted number is measured off the actual drawing, so a diagram is never
+  labelled with something its geometry doesn't support.
+- To mark a length as unknown (\`x\`) or hide it, the teacher clicks the label in the app.
+
+## Examples
+
+\`\`\`
+triangle a=90 b=35 ab=8              # right-angled, 35 deg at B
+triangle a=80 b=80 ab=6 fill=blue    # isosceles
+rect w=12 h=7 fill=cream             # area / perimeter
+para w=9 h=5 angle=60 height         # parallelogram with perpendicular height
+polygon n=8 side=4 mark labels       # regular octagon, interior angle marked
+circle r=6.5 d                       # circle labelled by its diameter
+sector r=5 angle=120 arc=            # sector showing its arc length
+prism base=rect w=8 h=4 depth=12 hidden
+prism base=poly n=6 side=3 depth=10 hidden
+parallel angle=115 lines=3 transversals=2
+path 0,0 10,0 10,4 6,4 6,7 0,7 close fill=cream   # L-shaped composite
+\`\`\`
+
+## A whole worksheet at once
+
+Separate diagrams with \`---\`. The tool renders them as a grid, with Copy and Save per
+diagram and "Save all" for a zip of every PNG at once:
+
+\`\`\`
+rect w=10 h=6 fill=cream
+---
+triangle a=90 b=30 ab=7 fill=blue
+---
+prism base=tri w=6 h=4 depth=9 hidden
+\`\`\`
+`;
