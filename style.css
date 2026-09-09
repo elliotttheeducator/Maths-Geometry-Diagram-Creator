@@ -1,14 +1,54 @@
+/* App-chrome tokens (toolbar/sidebar/canvas-frame) adapt to the viewer's theme.
+   The diagram canvas itself stays a fixed white "page" in every theme, deliberately --
+   diagrams are drawn to be exported onto white documents/slides, so what you see while
+   editing should match what comes out, regardless of whether the app chrome is dark. */
 :root {
   --bg: #f5f6f8;
   --panel-bg: #ffffff;
   --border: #d7dbe0;
   --text: #1f2430;
   --text-muted: #6b7280;
+  --text-disabled: #b0b4bb;
   --accent: #2563eb;
   --accent-hover: #1d4ed8;
   --danger: #dc2626;
   --shape-stroke: #1f2430;
   --selected: #2563eb;
+  --modal-overlay: rgba(15, 18, 25, 0.55);
+  --checker-a: #f0f1f3;
+  --checker-b: #ffffff;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #14161c;
+    --panel-bg: #1c1f27;
+    --border: #333844;
+    --text: #e7e9ee;
+    --text-muted: #9298a6;
+    --text-disabled: #565c6a;
+    --accent: #5b8dff;
+    --accent-hover: #7ea2ff;
+    --danger: #f87171;
+    --modal-overlay: rgba(0, 0, 0, 0.65);
+    --checker-a: #262a34;
+    --checker-b: #33394a;
+  }
+}
+
+:root[data-theme="dark"] {
+  --bg: #14161c;
+  --panel-bg: #1c1f27;
+  --border: #333844;
+  --text: #e7e9ee;
+  --text-muted: #9298a6;
+  --text-disabled: #565c6a;
+  --accent: #5b8dff;
+  --accent-hover: #7ea2ff;
+  --danger: #f87171;
+  --modal-overlay: rgba(0, 0, 0, 0.65);
+  --checker-a: #262a34;
+  --checker-b: #33394a;
 }
 
 * { box-sizing: border-box; }
@@ -16,7 +56,7 @@
 .export-modal-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(15, 18, 25, 0.55);
+  background: var(--modal-overlay);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -47,7 +87,7 @@
 }
 
 .export-img-wrap {
-  background: repeating-conic-gradient(#f0f1f3 0% 25%, #ffffff 0% 50%) 0 0 / 16px 16px;
+  background: repeating-conic-gradient(var(--checker-a) 0% 25%, var(--checker-b) 0% 50%) 0 0 / 16px 16px;
   border: 1px solid var(--border);
   border-radius: 6px;
   padding: 10px;
@@ -125,7 +165,7 @@ button:hover:not(:disabled) {
 }
 
 button:disabled {
-  color: #b0b4bb;
+  color: var(--text-disabled);
   cursor: not-allowed;
 }
 
@@ -298,7 +338,7 @@ button.danger-btn:hover:not(:disabled) {
 .vertex-label {
   font-size: 15px;
   font-weight: 600;
-  fill: var(--text);
+  fill: var(--shape-stroke); /* fixed, not the chrome --text token -- see canvas note above */
   user-select: none;
 }
 
