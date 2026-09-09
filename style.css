@@ -287,31 +287,68 @@ button.danger-btn:hover:not(:disabled) {
   width: 20px;
 }
 
+.derived-value {
+  flex: 1;
+  font-size: 13px;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
 .scale-readout {
   font-variant-numeric: tabular-nums;
   font-weight: 600;
   font-size: 13px;
 }
 
-/* SVG shape styling */
+/* SVG shape styling -- modelled on Haese/Cambridge textbook diagrams: pastel faces,
+   thin near-black outlines, serif labels. Fills come from the palette per shape, so
+   they're set as attributes rather than here. */
 .shape-poly {
-  fill: rgba(37, 99, 235, 0.06);
   stroke: var(--shape-stroke);
-  stroke-width: 2;
+  stroke-width: 1.6;
+  stroke-linejoin: round;
 }
 
 .shape-poly.selected {
   stroke: var(--selected);
-  fill: rgba(37, 99, 235, 0.12);
+  stroke-width: 2.2;
 }
 
 .shape-line {
   stroke: var(--shape-stroke);
-  stroke-width: 2;
+  stroke-width: 1.6;
+  fill: none;
+  stroke-linecap: round;
 }
 
 .shape-line.selected {
   stroke: var(--selected);
+  stroke-width: 2.2;
+}
+
+.construction-line {
+  stroke: var(--shape-stroke);
+  stroke-width: 1.3;
+  stroke-dasharray: 5 4;
+  fill: none;
+}
+
+.hidden-edge {
+  stroke: var(--shape-stroke);
+  stroke-width: 1.2;
+  stroke-dasharray: 6 5;
+  fill: none;
+  opacity: 0.75;
+}
+
+.dimension-shaft {
+  stroke: var(--shape-stroke);
+  stroke-width: 1.3;
+}
+
+.dimension-head {
+  fill: var(--shape-stroke);
+  stroke: none;
 }
 
 .vertex-handle {
@@ -335,17 +372,24 @@ button.danger-btn:hover:not(:disabled) {
   opacity: 0.85;
 }
 
-.vertex-label {
-  font-size: 15px;
-  font-weight: 600;
-  fill: var(--shape-stroke); /* fixed, not the chrome --text token -- see canvas note above */
+/* Textbook diagrams set their labels in a serif face -- it's most of what makes a
+   diagram read as "from a book" rather than "drawn in an app". */
+.vertex-label,
+.side-label,
+.angle-label {
+  font-family: Georgia, "Times New Roman", "Nimbus Roman", serif;
   user-select: none;
 }
 
+.vertex-label {
+  font-size: 16px;
+  font-style: italic;
+  fill: var(--shape-stroke); /* fixed, not the chrome --text token -- see canvas note above */
+}
+
 .side-label, .angle-label {
-  font-size: 13px;
-  fill: #374151;
-  user-select: none;
+  font-size: 15px;
+  fill: var(--shape-stroke);
   cursor: text;
 }
 
@@ -355,14 +399,14 @@ button.danger-btn:hover:not(:disabled) {
 
 .angle-arc {
   fill: none;
-  stroke: #d97706;
-  stroke-width: 1.5;
+  stroke: var(--shape-stroke);
+  stroke-width: 1.3;
 }
 
 .right-angle-mark {
   fill: none;
-  stroke: #d97706;
-  stroke-width: 1.5;
+  stroke: var(--shape-stroke);
+  stroke-width: 1.3;
 }
 
 .tick-mark {

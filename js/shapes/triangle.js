@@ -13,6 +13,7 @@ import {
 } from "../geometry.js";
 import { el, text, clear, toSvgPoint, renderRemovableLabel } from "../svgUtil.js";
 import { parseFieldInput } from "../fieldInput.js";
+import { paletteEntry } from "../palette.js";
 
 const DEG = Math.PI / 180;
 
@@ -60,6 +61,7 @@ export class Triangle {
     this.cevian = { apex: null, t: 0.5 };
     this.cevianLengthOverride = undefined;
     this.cevianPointLabels = ["D", "E"];
+    this.fillId = "cream";
     this.selected = false;
     this.group = null;
     this.controller = null;
@@ -320,6 +322,7 @@ export class Triangle {
         });
       }
     }
+    fields.push({ key: "fill", group: "Appearance", label: "Fill", kind: "swatch", value: this.fillId });
     fields.push({
       key: "cevian-toggle",
       group: "Parallel segment",
@@ -410,6 +413,11 @@ export class Triangle {
       const extIdx = Number(key.slice(4));
       const str = String(value).trim();
       this.exteriorOverrides[extIdx] = str === "" ? "" : str;
+      this.notifyChange();
+      return;
+    }
+    if (key === "fill") {
+      this.fillId = value;
       this.notifyChange();
       return;
     }
@@ -551,6 +559,7 @@ export class Triangle {
     const poly = el("polygon", {
       points: `${A.x},${A.y} ${B.x},${B.y} ${C.x},${C.y}`,
       class: `shape-poly${this.selected ? " selected" : ""}`,
+      fill: paletteEntry(this.fillId).fill,
     });
     poly.addEventListener("pointerdown", (e) => this.onBodyPointerDown(e));
     this.group.appendChild(poly);

@@ -11,12 +11,13 @@ import {
 } from "../geometry.js";
 import { el, clear, toSvgPoint, renderRemovableLabel } from "../svgUtil.js";
 import { parseFieldInput } from "../fieldInput.js";
+import { paletteEntry, SHAPE_STROKE } from "../palette.js";
 
 const SNAP_DIST = 18;
 const RIGHT_ANGLE_TOLERANCE = 0.5;
 const MAX_CYCLE_LEN = 8;
 const MAX_CYCLES = 40;
-const DEFAULT_COLOR = "#1f2430";
+const DEFAULT_COLOR = SHAPE_STROKE;
 const LETTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
 
 // A freeform diagram: a graph of vertices connected by line segments. Segments can
@@ -610,12 +611,12 @@ export class LineGraph {
 
     for (const cycle of this.findCycles()) {
       const key = this.cycleKey(cycle);
-      const color = this.fillColors[key];
-      if (!color || color === "none") continue;
+      const fill = paletteEntry(this.fillColors[key] || "none").fill;
+      if (!this.fillColors[key] || fill === "none") continue;
       const pts = cycle.map((id) => this.getVertex(id)).filter(Boolean);
       if (pts.length !== cycle.length) continue;
       fillsLayer.appendChild(
-        el("polygon", { points: pts.map((p) => `${p.x},${p.y}`).join(" "), fill: color, stroke: "none" })
+        el("polygon", { points: pts.map((p) => `${p.x},${p.y}`).join(" "), fill, stroke: "none" })
       );
     }
 

@@ -5,15 +5,19 @@ const EXPORT_SCALE = 2; // render at 2x for crisp pasting into a Word doc / slid
 // default fill (solid black) for every polygon/path, which visibly breaks the export.
 // This mirrors the relevant rules from style.css so exported files render identically.
 const EXPORT_STYLE = `
-text { font-family: -apple-system, "Segoe UI", Helvetica, Arial, sans-serif; }
-.shape-poly { fill: rgba(37, 99, 235, 0.06); stroke: #1f2430; stroke-width: 2; }
-.shape-line { stroke: #1f2430; stroke-width: 2; fill: none; }
-.vertex-label { font-size: 15px; font-weight: 600; fill: #1f2430; }
-.side-label, .angle-label { font-size: 13px; fill: #374151; }
-.angle-arc { fill: none; stroke: #d97706; stroke-width: 1.5; }
-.right-angle-mark { fill: none; stroke: #d97706; stroke-width: 1.5; }
-.parallel-chevron { stroke: #1f2430; stroke-width: 1.5; fill: none; }
-.equal-length-tick { stroke: #1f2430; stroke-width: 1.5; }
+text { font-family: Georgia, "Times New Roman", "Nimbus Roman", serif; }
+.shape-poly { stroke: #1a1a1a; stroke-width: 1.6; stroke-linejoin: round; }
+.shape-line { stroke: #1a1a1a; stroke-width: 1.6; fill: none; stroke-linecap: round; }
+.construction-line { stroke: #1a1a1a; stroke-width: 1.3; stroke-dasharray: 5 4; fill: none; }
+.hidden-edge { stroke: #1a1a1a; stroke-width: 1.2; stroke-dasharray: 6 5; fill: none; opacity: 0.75; }
+.dimension-shaft { stroke: #1a1a1a; stroke-width: 1.3; }
+.dimension-head { fill: #1a1a1a; stroke: none; }
+.vertex-label { font-size: 16px; font-style: italic; fill: #1a1a1a; }
+.side-label, .angle-label { font-size: 15px; fill: #1a1a1a; }
+.angle-arc { fill: none; stroke: #1a1a1a; stroke-width: 1.3; }
+.right-angle-mark { fill: none; stroke: #1a1a1a; stroke-width: 1.3; }
+.parallel-chevron { stroke: #1a1a1a; stroke-width: 1.5; fill: none; }
+.equal-length-tick { stroke: #1a1a1a; stroke-width: 1.5; }
 `;
 
 const CROP_PADDING = 24;

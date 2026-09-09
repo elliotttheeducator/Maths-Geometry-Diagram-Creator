@@ -1,3 +1,5 @@
+import { PALETTE } from "./palette.js";
+
 const KIND_META = {
   angle: { unit: "°", min: 1, max: 178, step: 0.5 },
   length: { unit: "u", min: 0.2, max: 40, step: 0.1 },
@@ -5,18 +7,6 @@ const KIND_META = {
   ratio: { unit: "", min: 0.05, max: 0.95, step: 0.02, suffix: "" },
 };
 
-// Fixed pastel palette for polygon fills -- keeps the "pastel" look consistent
-// instead of a free-for-all color wheel. "none" renders as a transparent swatch.
-export const PASTEL_SWATCHES = [
-  "none",
-  "#FBE4E4",
-  "#FFF3D6",
-  "#E7F3D6",
-  "#D9F0E8",
-  "#DCE9FB",
-  "#E6E0F8",
-  "#FBE0F0",
-];
 
 export function renderSidebar(container, shape) {
   container.innerHTML = "";
@@ -93,13 +83,13 @@ function renderField(shape, field) {
   if (field.kind === "swatch") {
     const wrap = document.createElement("div");
     wrap.className = "swatch-row";
-    for (const color of PASTEL_SWATCHES) {
+    for (const entry of PALETTE) {
       const btn = document.createElement("button");
       btn.type = "button";
-      btn.className = "swatch-btn" + (field.value === color ? " selected" : "");
-      btn.style.background = color === "none" ? "transparent" : color;
-      btn.title = color === "none" ? "No fill" : color;
-      btn.addEventListener("click", () => shape.setField(field.key, color));
+      btn.className = "swatch-btn" + (field.value === entry.id ? " selected" : "");
+      btn.style.background = entry.fill === "none" ? "transparent" : entry.fill;
+      btn.title = entry.label;
+      btn.addEventListener("click", () => shape.setField(field.key, entry.id));
       wrap.appendChild(btn);
     }
     row.appendChild(wrap);
@@ -119,6 +109,16 @@ function renderField(shape, field) {
   }
 
   const meta = KIND_META[field.kind] || { unit: "", min: 0, max: 100, step: 1 };
+
+  // Derived values (area, volume, circumference) -- shown, never typed into, since
+  // they follow from the dimensions above them.
+  if (field.readOnly) {
+    const out = document.createElement("span");
+    out.className = "derived-value";
+    out.textContent = `${field.value}${meta.unit === "u" ? "" : meta.unit}`;
+    row.appendChild(out);
+    return row;
+  }
 
   if (field.kind === "scale" || field.kind === "ratio") {
     const range = document.createElement("input");

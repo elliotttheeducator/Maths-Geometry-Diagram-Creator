@@ -17,6 +17,7 @@ const outPath = process.argv[2] || join(ROOT, "dist", "artifact.html");
 // Dependency order matters: each file's imports must already have been concatenated.
 const JS_FILES = [
   "js/geometry.js",
+  "js/palette.js",
   "js/svgUtil.js",
   "js/fieldInput.js",
   "js/sidebar.js",
@@ -24,6 +25,9 @@ const JS_FILES = [
   "js/shapes/triangle.js",
   "js/shapes/parallelLines.js",
   "js/shapes/lineGraph.js",
+  "js/shapes/circle.js",
+  "js/shapes/quadrilateral.js",
+  "js/shapes/prism.js",
   "js/app.js",
 ];
 

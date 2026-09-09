@@ -1,6 +1,9 @@
 import { Triangle } from "./shapes/triangle.js";
 import { ParallelLines } from "./shapes/parallelLines.js";
 import { LineGraph } from "./shapes/lineGraph.js";
+import { Circle } from "./shapes/circle.js";
+import { Quadrilateral } from "./shapes/quadrilateral.js";
+import { Prism } from "./shapes/prism.js";
 import { renderSidebar } from "./sidebar.js";
 import { exportSvg, exportPng } from "./export.js";
 
@@ -12,6 +15,9 @@ const gridBg = document.getElementById("grid-bg");
 const addTriangleBtn = document.getElementById("add-triangle");
 const addParallelBtn = document.getElementById("add-parallel");
 const addLineBtn = document.getElementById("add-line");
+const addQuadBtn = document.getElementById("add-quad");
+const addCircleBtn = document.getElementById("add-circle");
+const addPrismBtn = document.getElementById("add-prism");
 const duplicateBtn = document.getElementById("duplicate-scaled");
 const deleteBtn = document.getElementById("delete-shape");
 const exportSvgBtn = document.getElementById("export-svg");
@@ -159,6 +165,24 @@ addParallelBtn.addEventListener("click", () => {
   const o = ((spawnOffset - 1) % 4) * 25 - 37;
   const p = new ParallelLines({ center: { x: 500 + o, y: 350 + o } });
   addShape(p);
+});
+
+addQuadBtn.addEventListener("click", () => {
+  spawnOffset += 1;
+  const o = ((spawnOffset - 1) % 4) * 28 - 40;
+  addShape(new Quadrilateral({ origin: { x: 380 + o, y: 430 + o } }));
+});
+
+addCircleBtn.addEventListener("click", () => {
+  spawnOffset += 1;
+  const o = ((spawnOffset - 1) % 4) * 28 - 40;
+  addShape(new Circle({ center: { x: 500 + o, y: 350 + o } }));
+});
+
+addPrismBtn.addEventListener("click", () => {
+  spawnOffset += 1;
+  const o = ((spawnOffset - 1) % 4) * 28 - 40;
+  addShape(new Prism({ origin: { x: 380 + o, y: 450 + o } }));
 });
 
 // "+Line" adds a segment to the currently-selected line graph (so repeated
