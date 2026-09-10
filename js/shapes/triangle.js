@@ -161,8 +161,8 @@ export class Triangle {
     // If 2 angles are already locked, they fully determine the triangle's shape
     // already -- this side lock should only set the *scale*, never disturb them.
     const lockedAngles = [0, 1, 2].filter((i) => this.angleLockDeg[i] != null);
-    if (lockedAngles.length === 2) {
-      this.scaleToMatchSide(lockedAngles, sideIndex);
+    if (lockedAngles.length >= 2) {
+      this.scaleToMatchSide(lockedAngles.slice(0, 2), sideIndex);
       this.verifyLocks();
       return;
     }
@@ -181,10 +181,19 @@ export class Triangle {
     }
 
     let lockedIdx = [0, 1, 2].filter((i) => this.sideLockUnits[i] != null);
+    // Three sides is not over-specified -- it determines the triangle exactly -- so it
+    // gets a real SSS construction rather than the drop-the-oldest-lock rule, which
+    // used to leave "sides 3, 4, 5" quietly drawn as 3.4, 4, 5.
     if (lockedIdx.length === 3) {
-      const oldest = this._lockOrder.find((t) => t.startsWith("side:"));
-      this.clearSideLock(Number(oldest.split(":")[1]));
-      lockedIdx = [0, 1, 2].filter((i) => this.sideLockUnits[i] != null);
+      if (this.placeFromThreeSides()) {
+        this.verifyLocks();
+        return;
+      }
+      const sideName = `${this.labels[sideIndex]}${this.labels[(sideIndex + 1) % 3]}`;
+      this.lastRefusal = `${sideName}=${round1(newLengthUnits)} breaks the triangle inequality -- no triangle has those three sides`;
+      this.clearSideLock(sideIndex);
+      this.verifyLocks();
+      return;
     }
 
     if (lockedIdx.length === 2) {
@@ -193,6 +202,36 @@ export class Triangle {
       this.applySideMove(sideIndex, newLengthUnits);
     }
     this.verifyLocks();
+  }
+
+  // SSS: all three side lengths given. Vertex A and the direction A->B stay put, B
+  // slides to its distance, and C is the intersection of the two circles centred on A
+  // and B -- taken on whichever side C already sits, so the triangle doesn't flip over.
+  // Returns false when the three lengths violate the triangle inequality, which is
+  // exactly when no such triangle exists.
+  placeFromThreeSides() {
+    const [ab, bc, ca] = this.sideLockUnits.map((u) => u * PX_PER_UNIT);
+    if (ab + bc <= ca || bc + ca <= ab || ca + ab <= bc) return false;
+
+    const A = this.points[0];
+    const dir = Math.atan2(this.points[1].y - A.y, this.points[1].x - A.x);
+    const ux = Math.cos(dir);
+    const uy = Math.sin(dir);
+    const B = { x: A.x + ux * ab, y: A.y + uy * ab };
+
+    // Foot of C on AB, then its perpendicular offset.
+    const along = (ab * ab + ca * ca - bc * bc) / (2 * ab);
+    const height = Math.sqrt(Math.max(0, ca * ca - along * along));
+    const prev = this.points[2];
+    const cross = ux * (prev.y - A.y) - uy * (prev.x - A.x);
+    const side = cross >= 0 ? 1 : -1;
+
+    this.points[1] = B;
+    this.points[2] = {
+      x: A.x + ux * along - uy * height * side,
+      y: A.y + uy * along + ux * height * side,
+    };
+    return true;
   }
 
   // With exactly one angle locked, at vertex v: vertex v and the directions of both

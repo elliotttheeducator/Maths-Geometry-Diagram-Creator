@@ -1,4 +1,4 @@
-import { parseSpec, buildDiagram, diagramToSpec } from "./spec.js";
+import { parseSpec, buildDiagram, diagramToSpec, describeGrammar, describeFields } from "./spec.js";
 import { exportSheet } from "./export.js";
 import { AI_CARD } from "./aiCard.js";
 
@@ -91,7 +91,7 @@ export function openSpecPanel({ currentShapes, onLoadDiagram, initialText }) {
   const hint = document.createElement("p");
   hint.className = "export-hint";
   hint.textContent =
-    'One shape per line, "---" between diagrams. Ask Claude for spec lines rather than for a whole diagram tool -- "For AI" below is the page to give it.';
+    'One shape per line, "---" between diagrams. Type ? for the full grammar, or ?fields for everything the selected shape can be asked for. "For AI" below is the page to hand a chat.';
   panel.appendChild(hint);
 
   const textarea = document.createElement("textarea");
@@ -121,6 +121,24 @@ export function openSpecPanel({ currentShapes, onLoadDiagram, initialText }) {
   drawBtn.className = "primary";
   drawBtn.textContent = "Draw";
   drawBtn.addEventListener("click", () => {
+    // "?" answers with the whole vocabulary and "?fields" with everything the selected
+    // shape can be asked for -- so a writer who doesn't have the reference to hand can
+    // get it from the tool and paste it back, instead of guessing or reading the code.
+    const asked = textarea.value.trim().toLowerCase();
+    if (asked === "?" || asked === "help") {
+      textarea.value = describeGrammar();
+      messages.textContent = "Grammar above -- Copy spec puts it on the clipboard.";
+      return;
+    }
+    if (asked === "?fields" || asked === "fields") {
+      const target = currentShapes[currentShapes.length - 1];
+      textarea.value = target
+        ? describeFields(target)
+        : "# nothing on the canvas -- draw a shape first, then ask for ?fields";
+      messages.textContent = target ? "Fields above -- any of them works as `set key=value`." : "";
+      return;
+    }
+
     const diagrams = parseSpec(textarea.value);
     if (!diagrams.length) {
       messages.textContent = "Nothing to draw yet.";

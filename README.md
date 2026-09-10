@@ -36,6 +36,16 @@ Paste that into **Spec…** in the toolbar, or open the page with the spec URL-e
 after `#spec=`. One diagram loads onto the canvas ready to edit; several (`---`
 separated) render as a grid with Copy / Save / Save all.
 
+Specs are meant to be written the way a question is phrased — `triangle right
+legs=6,8 hyp=x`, `triangle sides=3,4,5`, `rect w=12cm h=7cm` — and the tool takes it
+from there: it solves the geometry, quotes the unit, corrects a near-miss key and says
+so, and labels only what the spec mentions. Two lines cover anything the vocabulary
+misses: `units cm`, and `set <key>=<value>`, which reaches every field the sidebar has.
+
+The tool describes itself rather than expecting anyone to read this repo: `?` in the
+Spec box prints the whole grammar, and `?fields` lists every field of the shape on
+screen, both generated from the code that implements them.
+
 [`AI-INSTRUCTIONS.md`](AI-INSTRUCTIONS.md) is the one-page reference to paste into a
 Claude Project, and [`skill/geometry-diagrams/`](skill/geometry-diagrams) is the same
 thing packaged as a Claude Skill. Both are generated from `js/aiCard.js` — edit that,

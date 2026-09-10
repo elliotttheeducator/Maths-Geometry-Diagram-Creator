@@ -20,6 +20,27 @@ spec line is all that is needed, and costs a fraction as much.
   Opening it draws the diagram straight away. (Links only work on that hosted address;
   inside a Claude artifact preview, paste into the Spec box instead.)
 
+## Say it the way the question is phrased
+
+The tool carries the geometry; you only state what the question gives. These all work
+as written, and each is a complete diagram:
+
+```
+units cm
+triangle right legs=6,8 hyp=x        # Pythagoras
+triangle sides=3,4,5                 # three sides -- solved exactly
+triangle isosceles base=6 legs=5
+triangle equilateral side=5
+parallel angle=115 x=L2c             # co-interior angles
+```
+
+A unit written on a measurement (`w=12cm`) sets the unit for the whole spec, so
+`units cm` is only needed when no measurement carries one.
+
+If a word is close to a real one it's read as that one and the tool says so, so a
+half-remembered key still draws. If it isn't close to anything, the message lists
+every key that shape takes.
+
 ## Grammar
 
 One shape per line. `---` alone on a line starts a new diagram. `#` starts a comment.
@@ -40,6 +61,21 @@ Lengths are in units, angles in degrees. Bare words are flags; `key=value` sets 
 | `path` | `x,y x,y x,y ...` then `close`, for composite/L-shaped outlines. y points UP. Corner angles and parallel/equal marks start hidden; add `angles` or `marks` to show them. |
 
 Every shape also takes `fill=` one of `cream green blue rose violet amber slate none`.
+
+## When the vocabulary above isn't enough
+
+Two lines cover everything else, so an unusual diagram never needs new syntax and you
+never need to read the tool's source:
+
+- `units cm` — the unit every length is quoted in (mm, cm, m, km, in, ft).
+- `set <key>=<value>` — changes **any** field of the shape on the line above, using the
+  same field names the app's own sidebar uses. For example `set ext-toggle-1=on` extends
+  a triangle's side to show an exterior angle.
+
+To find those field names, ask the teacher to type `?fields` in the Spec box with the
+shape on screen: the tool lists every field that shape has, generated from the shape
+itself. `?` on its own prints this whole grammar. Either can be pasted back to you --
+that is the intended way to discover what exists, rather than reading any code.
 
 ## What gets labelled — the rule that matters
 

@@ -8,6 +8,7 @@ import { RegularPolygon } from "./shapes/polygon.js";
 import { renderSidebar } from "./sidebar.js";
 import { exportSvg, exportPng, exportSheet } from "./export.js";
 import { parseSpec, buildDiagram } from "./spec.js";
+import { setLengthUnit, lengthUnit } from "./units.js";
 import { openSpecPanel, renderDiagramToSvg, disposeRenderedSvgs } from "./specPanel.js";
 
 const svg = document.getElementById("canvas");
@@ -30,6 +31,7 @@ const exportPngBtn = document.getElementById("export-png");
 const gridToggle = document.getElementById("toggle-grid");
 const snapToggle = document.getElementById("toggle-snap");
 const specBtn = document.getElementById("open-spec");
+const unitSelect = document.getElementById("unit-select");
 
 let shapes = [];
 let selectedShape = null;
@@ -268,6 +270,13 @@ deleteBtn.addEventListener("click", () => {
   deselectAll();
 });
 
+// The unit is display-only, so switching it just relabels what's already drawn.
+unitSelect.addEventListener("change", () => {
+  setLengthUnit(unitSelect.value);
+  for (const shape of shapes) shape.render();
+  refreshSidebar();
+});
+
 gridToggle.addEventListener("change", () => {
   gridBg.style.display = gridToggle.checked ? "" : "none";
 });
@@ -291,6 +300,7 @@ function clearCanvas() {
 // warnings so the caller can show what it couldn't make sense of.
 function loadDiagram(items) {
   const { shapes: built, warnings } = buildDiagram(items);
+  if (unitSelect.value !== lengthUnit()) unitSelect.value = lengthUnit();
   if (!built.length) return warnings.length ? warnings : ["Nothing recognisable in that spec."];
   clearCanvas();
   for (const shape of built) {

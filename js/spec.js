@@ -6,6 +6,8 @@ import { Quadrilateral } from "./shapes/quadrilateral.js";
 import { Prism } from "./shapes/prism.js";
 import { RegularPolygon } from "./shapes/polygon.js";
 import { PX_PER_UNIT, round1 } from "./geometry.js";
+import { setLengthUnit, lengthUnit, UNIT_CHOICES } from "./units.js";
+import { PALETTE } from "./palette.js";
 
 // A tiny written format for diagrams, so a diagram can be asked for in one line
 // instead of built by hand:
@@ -23,6 +25,8 @@ const ORIGIN = { x: 300, y: 480 }; // where path coordinates put (0,0)
 
 export function parseSpec(text) {
   const diagrams = [[]];
+  const globals = []; // directives (units) apply to every diagram, wherever they appear
+  lastInlineUnit = null;
   for (const rawLine of String(text).split(/\r?\n/)) {
     const line = rawLine.replace(/\s+#.*$/, "").trim();
     if (!line || line.startsWith("#")) continue;
@@ -30,9 +34,17 @@ export function parseSpec(text) {
       diagrams.push([]);
       continue;
     }
-    diagrams[diagrams.length - 1].push(parseLine(line));
+    const item = parseLine(line);
+    if (item.type === "units") globals.push(item);
+    else diagrams[diagrams.length - 1].push(item);
   }
-  return diagrams.filter((d) => d.length > 0);
+  // Writing "12cm" anywhere states the unit for the whole spec, unless a `units` line
+  // already did. Saying nothing leaves whatever the page is set to, so a spec never
+  // silently strips the unit a teacher chose from the toolbar.
+  if (!globals.length && lastInlineUnit) {
+    globals.push({ type: "units", args: [["unit", lastInlineUnit]], points: [], raw: "" });
+  }
+  return diagrams.filter((d) => d.length > 0).map((d) => [...globals, ...d]);
 }
 
 function parseLine(line) {
@@ -43,7 +55,7 @@ function parseLine(line) {
   for (const tok of tokens) {
     const eq = tok.indexOf("=");
     if (eq > 0) {
-      args.push([tok.slice(0, eq).toLowerCase(), tok.slice(eq + 1)]);
+      args.push([tok.slice(0, eq).toLowerCase(), stripUnitSuffix(tok.slice(eq + 1))]);
     } else if (/^-?[\d.]+,-?[\d.]+$/.test(tok)) {
       const [x, y] = tok.split(",").map(Number);
       points.push({ x, y });
@@ -51,7 +63,25 @@ function parseLine(line) {
       args.push([tok.toLowerCase(), true]); // bare word = flag
     }
   }
+  // `units cm` reads more naturally than `units=cm`, so accept the bare form.
+  if (type === "units" && args.length && args[0][1] === true) return { type, args: [["unit", args[0][0]]], points, raw: line };
   return { type, args, points, raw: line };
+}
+
+// "12cm" both means 12 and says what unit the diagram is in -- writing the unit next
+// to a measurement is what somebody transcribing a question naturally does, so it's
+// taken as the answer to both questions rather than treated as an error.
+function stripUnitSuffix(value) {
+  const m = /^(-?\d*\.?\d+)\s*(mm|cm|m|km|in|ft)$/i.exec(String(value));
+  if (!m) return value;
+  lastInlineUnit = m[2].toLowerCase();
+  return m[1];
+}
+
+let lastInlineUnit = null;
+
+function isTruthyWord(value) {
+  return !["off", "no", "false", "0", ""].includes(String(value).toLowerCase());
 }
 
 // Builds one diagram's shapes. Unknown keys are collected rather than thrown, so a
@@ -61,6 +91,35 @@ export function buildDiagram(items) {
   const warnings = [];
   for (const item of items) {
     try {
+      if (item.type === "units") {
+        const unit = item.args.find(([k]) => k === "unit");
+        setLengthUnit(unit ? String(unit[1]) : "");
+        if (unit && lengthUnit() !== String(unit[1])) {
+          warnings.push(`Unknown unit "${unit[1]}" -- use ${UNIT_CHOICES.filter(Boolean).join(", ")}`);
+        }
+        continue;
+      }
+      // `set` is the way past this vocabulary: it addresses any field the sidebar has,
+      // on the shape written above it, so an unusual diagram never needs new syntax.
+      if (item.type === "set") {
+        const target = shapes[shapes.length - 1];
+        if (!target) {
+          warnings.push("set has no shape above it to apply to");
+          continue;
+        }
+        for (const [key, value] of item.args) {
+          const field = target.getFields().find((f) => f.key === key);
+          if (!field) {
+            warnings.push(`"${key}" isn't a field of this ${target.type} -- ask for ?fields to list them`);
+            continue;
+          }
+          // On a switch, "off"/"no"/"false"/"0" has to mean off: Boolean("off") is true,
+          // which would turn on exactly what was being turned off.
+          if (field.kind === "toggle") target.setField(key, value === true ? true : isTruthyWord(value));
+          else target.setField(key, value);
+        }
+        continue;
+      }
       const shape = buildShape(item, warnings);
       if (shape) shapes.push(shape);
       else warnings.push(`Unknown shape "${item.type}" -- ${SHAPE_LIST}`);
@@ -71,7 +130,143 @@ export function buildDiagram(items) {
   return { shapes, warnings };
 }
 
+// What a shape can be asked for right now, straight from the shape itself -- so a
+// writer wanting something unusual can see the real field keys instead of reading the
+// source, and the list can never drift from what the sidebar actually offers.
+export function describeFields(shape) {
+  const groups = new Map();
+  for (const field of shape.getFields()) {
+    if (field.kind === "info") continue;
+    if (!groups.has(field.group)) groups.set(field.group, []);
+    const kind = field.readOnly ? "read-only" : field.kind;
+    groups.get(field.group).push(`${field.key} (${kind})`);
+  }
+  const lines = [`# fields of this ${shape.type} -- use them as: set <key>=<value>`];
+  for (const [group, keys] of groups) lines.push(`${group}: ${keys.join(", ")}`);
+  return lines.join("\n");
+}
+
+// The whole vocabulary, generated from the registry rather than written out twice.
+export function describeGrammar() {
+  const lines = [
+    "# Diagram spec -- one shape per line, --- between diagrams, # for comments",
+    "# Only what you write is labelled; everything else is drawn but left silent.",
+    "",
+    "units cm            set the unit every length is quoted in",
+    "set <key>=<value>   change any field of the shape on the line above",
+    "",
+  ];
+  for (const [name, entry] of Object.entries(SHAPE_KEYS)) {
+    lines.push(`${name} (${entry.words.join(", ")})`);
+    lines.push(`    ${entry.about}`);
+    lines.push(`    keys: ${entry.keys.split(" ").join(", ")}`);
+  }
+  lines.push("", "fill: " + PALETTE.map((p) => p.id).join(", "));
+  return lines.join("\n");
+}
+
 const SHAPE_LIST = "try triangle, rect, para, polygon, circle, sector, prism, parallel or path";
+
+// Which words each shape understands. This is the single registry behind three things:
+// suggesting a correction for a near-miss, generating the built-in "?" help, and
+// telling a writer what exists -- so nobody has to read the source to find out.
+export const SHAPE_KEYS = {
+  triangle: {
+    words: ["triangle", "tri"],
+    keys: "a b c ab bc ca right isosceles equilateral legs hyp base side sides labels ext ticks seg fill",
+    about: "angles a/b/c at each vertex, sides ab/bc/ca; or say right, isosceles, equilateral with legs=/hyp=/base=/side=",
+  },
+  rect: {
+    words: ["rect", "rectangle", "square"],
+    keys: "w h width height base side rot rotation ticks labels arrows fill",
+    about: "w= and h=",
+  },
+  para: {
+    words: ["para", "parallelogram"],
+    keys: "w h width height base side angle rot rotation ticks labels arrows fill",
+    about: "w= h= angle=, plus height to draw the perpendicular height",
+  },
+  polygon: {
+    words: ["polygon", "pentagon", "hexagon", "octagon"],
+    keys: "n sides side r radius rot rotation labels mark angle ticks fill",
+    about: "n= sides and side= length (pentagon/hexagon/octagon preset n)",
+  },
+  circle: {
+    words: ["circle", "sector", "arc"],
+    keys: "r radius d diameter angle arc fill",
+    about: "r=, plus angle= for a sector or arc",
+  },
+  prism: {
+    words: ["prism"],
+    keys: "base w h width height depth d angle n sides side r radius da view hidden fill",
+    about: "base=rect|tri|para|poly with w= h= depth=",
+  },
+  parallel: {
+    words: ["parallel", "lines"],
+    keys: "angle angle2 dir direction gap lines transversals trans show x unknown",
+    about: "angle= for the transversal; show=/x= address crossings as L1a..L2d",
+  },
+  path: {
+    words: ["path", "shape"],
+    keys: "close closed fill angles marks",
+    about: "x,y points (y upwards) then close",
+  },
+};
+
+const WORD_TO_SHAPE = new Map();
+for (const [shape, entry] of Object.entries(SHAPE_KEYS)) {
+  for (const word of entry.words) WORD_TO_SHAPE.set(word, shape);
+}
+
+// Levenshtein distance, used only to turn a near-miss into a suggestion.
+function editDistance(a, b) {
+  const rows = a.length + 1;
+  const cols = b.length + 1;
+  let prev = Array.from({ length: cols }, (_, j) => j);
+  for (let i = 1; i < rows; i++) {
+    const row = [i];
+    for (let j = 1; j < cols; j++) {
+      row[j] = Math.min(
+        prev[j] + 1,
+        row[j - 1] + 1,
+        prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1)
+      );
+    }
+    prev = row;
+  }
+  return prev[cols - 1];
+}
+
+function nearest(word, candidates) {
+  let best = null;
+  let bestDist = Infinity;
+  for (const candidate of candidates) {
+    const d = editDistance(word, candidate);
+    if (d < bestDist) {
+      bestDist = d;
+      best = candidate;
+    }
+  }
+  // One edit for short words, two for longer ones: close enough to be a typo rather
+  // than a different word entirely.
+  const limit = word.length <= 4 ? 1 : 2;
+  return bestDist <= limit ? best : null;
+}
+
+// The tool corrects what it can recognise and says so, instead of ignoring the line
+// and leaving the writer to guess which word was wrong.
+function correctArgs(shapeName, args, warn) {
+  const known = SHAPE_KEYS[shapeName].keys.split(" ");
+  return args.map(([key, value]) => {
+    if (known.includes(key)) return [key, value];
+    const guess = nearest(key, known);
+    if (guess) {
+      warn(`Read "${key}" as "${guess}" on ${shapeName}`);
+      return [guess, value];
+    }
+    return [key, value];
+  });
+}
 
 // Every measurement a shape can print next to itself. A spec'd diagram labels only
 // the ones the spec actually mentions and stays silent about the rest -- because a
@@ -87,15 +282,30 @@ const LABEL_KEYS = {
 };
 
 function buildShape(item, warnings) {
-  const { type, args, points } = item;
-  const note = (key) => warnings.push(`Ignored "${key}" on ${type}`);
+  const { points } = item;
+  const warn = (message) => warnings.push(message);
+
+  // A misspelled shape word is corrected the same way a misspelled key is.
+  let type = item.type;
+  let shapeName = WORD_TO_SHAPE.get(type);
+  if (!shapeName) {
+    const guess = nearest(type, [...WORD_TO_SHAPE.keys()]);
+    if (!guess) return null;
+    warn(`Read "${type}" as "${guess}"`);
+    type = guess;
+    shapeName = WORD_TO_SHAPE.get(guess);
+  }
+
+  const args = correctArgs(shapeName, item.args, warn);
+  const note = (key) => {
+    const known = SHAPE_KEYS[shapeName].keys.split(" ").join(", ");
+    warnings.push(`${shapeName} doesn't have "${key}" -- it takes: ${known}`);
+  };
   const mentioned = new Set();
   const mark = (...keys) => keys.forEach((k) => mentioned.add(k));
 
-  const warn = (message) => warnings.push(message);
-
   let shape = null;
-  if (type === "triangle") shape = buildTriangle(args, note, mark, warn);
+  if (type === "triangle" || type === "tri") shape = buildTriangle(args, note, mark, warn);
   else if (type === "rect" || type === "rectangle" || type === "square")
     shape = buildQuad(args, note, mark, "rectangle", type === "square");
   else if (type === "para" || type === "parallelogram") shape = buildQuad(args, note, mark, "parallelogram", false);
@@ -141,6 +351,56 @@ function buildTriangle(args, note, mark, warn) {
       if (value !== true && value !== "off") splitList(value).forEach((l, i) => t.setField(`label-${i}`, l));
     } else if (key === "ext") {
       for (const which of splitList(value)) t.setField(`ext-toggle-${vertexIndex(which, t.labels)}`, true);
+    } else if (key === "right") {
+      // The words a question is actually phrased in. A right angle sits at A, so its
+      // legs are the two sides meeting there and the hypotenuse is the one opposite.
+      t.setField("angle-0", 90);
+      mark("angle-0");
+    } else if (key === "legs") {
+      // Two values are the two sides meeting at the right angle; one value is the
+      // isosceles reading, where both sides off the base are that long.
+      const list = splitList(value);
+      if (list.length >= 2) {
+        t.setField("side-0", list[0]);
+        t.setField("side-2", list[1]);
+        mark("side-0", "side-2");
+      } else if (list.length === 1) {
+        t.setField("side-1", list[0]);
+        t.setField("side-2", list[0]);
+        mark("side-1", "side-2");
+      }
+    } else if (key === "hyp") {
+      t.setField("side-1", value);
+      mark("side-1");
+    } else if (key === "base") {
+      t.setField("side-0", value);
+      mark("side-0");
+    } else if (key === "equilateral") {
+      for (const i of [0, 1, 2]) t.setField(`angle-${i}`, 60);
+      mark("angle-0");
+    } else if (key === "isosceles") {
+      // On its own it says nothing measurable; it pairs with base= and side=/legs=.
+      continue;
+    } else if (key === "side" || key === "sides") {
+      // `sides=3,4,5` gives all three at once; a single value makes it equilateral.
+      const list = splitList(value);
+      if (list.length >= 3) {
+        list.slice(0, 3).forEach((len, i) => {
+          t.setField(`side-${i}`, len);
+          mark(`side-${i}`);
+        });
+      } else if (list.length === 2) {
+        // base plus the two equal sides, the usual way an isosceles is quoted
+        t.setField("side-0", list[0]);
+        t.setField("side-1", list[1]);
+        t.setField("side-2", list[1]);
+        mark("side-0", "side-1", "side-2");
+      } else if (list.length === 1) {
+        [0, 1, 2].forEach((i) => {
+          t.setField(`side-${i}`, list[0]);
+          mark(`side-${i}`);
+        });
+      }
     } else if (key === "ticks") t.setField("show-ticks", value !== "off");
     else if (key === "seg") {
       t.setField("cevian-toggle", true);

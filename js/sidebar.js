@@ -1,12 +1,20 @@
 import { PALETTE } from "./palette.js";
+import { lengthUnit } from "./units.js";
 
 const KIND_META = {
   angle: { unit: "°", min: 1, max: 178, step: 0.5 },
-  length: { unit: "u", min: 0.2, max: 40, step: 0.1 },
+  length: { unit: "", min: 0.2, max: 40, step: 0.1 },
   scale: { unit: "×", min: 0.2, max: 3, step: 0.05, suffix: "×" },
   ratio: { unit: "", min: 0.05, max: 0.95, step: 0.02, suffix: "" },
 };
 
+
+// The sidebar quotes lengths in whatever unit the diagram is set to, so what is typed
+// here and what appears on the drawing always read the same.
+function unitSuffix() {
+  const u = lengthUnit();
+  return u ? ` ${u}` : "";
+}
 
 export function renderSidebar(container, shape) {
   container.innerHTML = "";
@@ -123,7 +131,8 @@ function renderField(shape, field) {
   if (field.readOnly) {
     const out = document.createElement("span");
     out.className = "derived-value";
-    out.textContent = `${field.value}${meta.unit === "u" ? "" : meta.unit}`;
+    const suffix = field.kind === "length" ? unitSuffix() : meta.unit;
+    out.textContent = `${field.value}${suffix}`;
     row.appendChild(out);
     return row;
   }
@@ -159,7 +168,7 @@ function renderField(shape, field) {
 
   const unit = document.createElement("span");
   unit.className = "unit";
-  unit.textContent = meta.unit;
+  unit.textContent = field.kind === "length" ? unitSuffix().trim() || "u" : meta.unit;
   row.appendChild(unit);
 
   return row;

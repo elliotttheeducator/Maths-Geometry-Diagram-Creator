@@ -24,6 +24,17 @@
     <div class="toolbar-group">
       <label class="checkbox-label"><input type="checkbox" id="toggle-grid" /> Grid</label>
       <label class="checkbox-label"><input type="checkbox" id="toggle-snap" checked /> Snap</label>
+      <label class="checkbox-label">Units
+        <select id="unit-select">
+          <option value="">none</option>
+          <option value="mm">mm</option>
+          <option value="cm">cm</option>
+          <option value="m">m</option>
+          <option value="km">km</option>
+          <option value="in">in</option>
+          <option value="ft">ft</option>
+        </select>
+      </label>
       <button id="open-spec">Spec…</button>
       <button id="export-svg">Export SVG</button>
       <button id="export-png">Export PNG</button>

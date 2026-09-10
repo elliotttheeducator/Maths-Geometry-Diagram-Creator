@@ -1,3 +1,5 @@
+import { withUnit } from "./units.js";
+
 export const SVGNS = "http://www.w3.org/2000/svg";
 
 export function el(tag, attrs = {}, children = []) {
@@ -42,7 +44,10 @@ export function renderRemovableLabel({ x, y, value, hidden, cssClass, onRemove, 
     return g;
   }
 
-  const t = text(value, { x, y, class: cssClass, "text-anchor": "middle", "dominant-baseline": "middle" });
+  // A numeric value is a measured length, so it carries the diagram's unit; anything
+  // already a string is either an angle (with its own degree sign) or a label the
+  // user chose, and is shown exactly as it is.
+  const t = text(withUnit(value), { x, y, class: cssClass, "text-anchor": "middle", "dominant-baseline": "middle" });
   t.addEventListener("pointerdown", (e) => e.stopPropagation());
   if (onDoubleClick) t.addEventListener("dblclick", onDoubleClick);
   g.appendChild(t);
