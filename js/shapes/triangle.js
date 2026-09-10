@@ -62,6 +62,10 @@ export class Triangle {
     this.cevianLengthOverride = undefined;
     this.cevianPointLabels = ["D", "E"];
     this.fillId = "cream";
+    this.showTicks = true; // tick marks wherever two sides are genuinely equal
+    this.showVertexLabels = true;
+    // Set when an edit was refused as geometrically impossible, for the caller to report.
+    this.lastRefusal = null;
     this.selected = false;
     this.group = null;
     this.controller = null;
@@ -163,6 +167,19 @@ export class Triangle {
       return;
     }
 
+    // One locked angle: hold it exactly and solve the side around it. Without this,
+    // a right angle plus a leg plus the hypotenuse -- the ordinary Pythagoras setup --
+    // silently bent the right angle to something like 93.6 degrees.
+    if (lockedAngles.length === 1) {
+      if (!this.solveSideWithLockedAngle(lockedAngles[0], sideIndex)) {
+        const sideName = `${this.labels[sideIndex]}${this.labels[(sideIndex + 1) % 3]}`;
+        this.lastRefusal = `${sideName}=${round1(newLengthUnits)} is impossible alongside the values already locked`;
+        this.clearSideLock(sideIndex);
+      }
+      this.verifyLocks();
+      return;
+    }
+
     let lockedIdx = [0, 1, 2].filter((i) => this.sideLockUnits[i] != null);
     if (lockedIdx.length === 3) {
       const oldest = this._lockOrder.find((t) => t.startsWith("side:"));
@@ -176,6 +193,54 @@ export class Triangle {
       this.applySideMove(sideIndex, newLengthUnits);
     }
     this.verifyLocks();
+  }
+
+  // With exactly one angle locked, at vertex v: vertex v and the directions of both
+  // rays leaving it stay put (which is what keeps that angle exact), and one far point
+  // slides along its own ray until the requested side measures what it should.
+  //
+  // For a side touching v that's a straight slide. For the side opposite v it's the
+  // intersection of a ray with a circle -- a quadratic that has no solution when the
+  // requested length is shorter than the perpendicular distance to the ray, which is
+  // precisely the case where no such triangle exists. Returns false there instead of
+  // quietly bending the locked angle to make the numbers fit.
+  solveSideWithLockedAngle(v, sideIndex) {
+    const target = this.sideLockUnits[sideIndex] * PX_PER_UNIT;
+    const V = this.points[v];
+    const a = (v + 1) % 3; // far point of side v
+    const b = (v + 2) % 3; // far point of side (v+2)%3
+
+    if (sideIndex === v || sideIndex === (v + 2) % 3) {
+      const far = sideIndex === v ? a : b;
+      this.points[far] = pointOnRay(V, this.points[far], target);
+      return true;
+    }
+
+    // The opposite side: slide whichever far point isn't itself pinned by a side lock.
+    const aPinned = this.sideLockUnits[v] != null;
+    const bPinned = this.sideLockUnits[(v + 2) % 3] != null;
+    const slide = aPinned && !bPinned ? b : !aPinned && bPinned ? a : b;
+    const keep = slide === a ? b : a;
+    const t = this.rayDistanceForLength(V, this.points[slide], this.points[keep], target);
+    if (t == null) return false;
+    this.points[slide] = pointOnRay(V, this.points[slide], t);
+    return true;
+  }
+
+  // Distance t along the ray V->along at which the point sits exactly `target` from P.
+  rayDistanceForLength(V, along, P, target) {
+    const len = dist(V, along) || 1;
+    const u = { x: (along.x - V.x) / len, y: (along.y - V.y) / len };
+    const w = { x: V.x - P.x, y: V.y - P.y };
+    const wu = w.x * u.x + w.y * u.y;
+    const disc = wu * wu - (w.x * w.x + w.y * w.y) + target * target;
+    if (disc < 0) return null;
+    const root = Math.sqrt(disc);
+    const candidates = [-wu + root, -wu - root].filter((t) => t > 1e-6);
+    if (!candidates.length) return null;
+    // Two positive roots means the classic ambiguous case; take the one nearest the
+    // current shape so the triangle doesn't flip to its other solution unasked.
+    return candidates.reduce((best, t) => (Math.abs(t - len) < Math.abs(best - len) ? t : best));
   }
 
   // Uniformly rescales the whole triangle about vertex p (one of the 2 locked-angle
@@ -335,6 +400,20 @@ export class Triangle {
     }
     fields.push({ key: "fill", group: "Appearance", label: "Fill", kind: "swatch", value: this.fillId });
     fields.push({
+      key: "show-ticks",
+      group: "Appearance",
+      label: "Equal-side ticks",
+      kind: "toggle",
+      value: this.showTicks,
+    });
+    fields.push({
+      key: "show-vertex-labels",
+      group: "Appearance",
+      label: "Vertex letters",
+      kind: "toggle",
+      value: this.showVertexLabels,
+    });
+    fields.push({
       key: "cevian-toggle",
       group: "Parallel segment",
       label: "Show",
@@ -407,6 +486,16 @@ export class Triangle {
   setField(key, value) {
     if (key === "scale-factor") {
       this.applyScale(Number(value));
+      return;
+    }
+    if (key === "show-ticks") {
+      this.showTicks = Boolean(value);
+      this.notifyChange();
+      return;
+    }
+    if (key === "show-vertex-labels") {
+      this.showVertexLabels = Boolean(value);
+      this.notifyChange();
       return;
     }
     const [kind, idxStr] = key.split("-");
@@ -585,6 +674,8 @@ export class Triangle {
       if (this.exteriorExtended[i]) this.group.appendChild(this.renderExteriorAngle(i, angles[i]));
     }
 
+    if (this.showTicks) this.group.appendChild(this.renderEqualTicks());
+
     // side length labels
     for (let i = 0; i < 3; i++) {
       const from = this.points[i];
@@ -596,7 +687,7 @@ export class Triangle {
 
     // vertex handles + labels
     for (let i = 0; i < 3; i++) {
-      this.group.appendChild(this.renderVertexLabel(i, centroid));
+      if (this.showVertexLabels) this.group.appendChild(this.renderVertexLabel(i, centroid));
       this.group.appendChild(this.renderVertexHandle(i));
     }
 
@@ -621,6 +712,9 @@ export class Triangle {
     const group = el("g");
 
     if (hidden) {
+      // A right angle keeps its square even with the number hidden -- the square IS
+      // the statement, and a right-angled triangle with no mark on it reads wrong.
+      if (isRight) group.appendChild(this.rightAngleMark(V, dirF, dirR));
       group.appendChild(
         renderRemovableLabel({
           x: lp.x,
@@ -633,18 +727,7 @@ export class Triangle {
     }
 
     if (isRight) {
-      const size = 14;
-      const uF = { x: Math.cos(dirF), y: Math.sin(dirF) };
-      const uR = { x: Math.cos(dirR), y: Math.sin(dirR) };
-      const p1 = { x: V.x + uF.x * size, y: V.y + uF.y * size };
-      const p2 = { x: V.x + uF.x * size + uR.x * size, y: V.y + uF.y * size + uR.y * size };
-      const p3 = { x: V.x + uR.x * size, y: V.y + uR.y * size };
-      group.appendChild(
-        el("path", {
-          d: `M ${p1.x} ${p1.y} L ${p2.x} ${p2.y} L ${p3.x} ${p3.y}`,
-          class: "right-angle-mark",
-        })
-      );
+      group.appendChild(this.rightAngleMark(V, dirF, dirR));
       return group;
     }
 
@@ -671,6 +754,62 @@ export class Triangle {
       })
     );
     return group;
+  }
+
+  rightAngleMark(V, dirF, dirR) {
+    const size = 14;
+    const uF = { x: Math.cos(dirF), y: Math.sin(dirF) };
+    const uR = { x: Math.cos(dirR), y: Math.sin(dirR) };
+    const p1 = { x: V.x + uF.x * size, y: V.y + uF.y * size };
+    const p2 = { x: V.x + uF.x * size + uR.x * size, y: V.y + uF.y * size + uR.y * size };
+    const p3 = { x: V.x + uR.x * size, y: V.y + uR.y * size };
+    return el("path", {
+      d: `M ${p1.x} ${p1.y} L ${p2.x} ${p2.y} L ${p3.x} ${p3.y}`,
+      class: "right-angle-mark",
+    });
+  }
+
+  // Tick marks on sides that are genuinely the same length -- the notation that says
+  // "isosceles" without repeating the number, and the reason an unlabelled equal side
+  // still carries information. Sides are grouped by measured length, so the marks can
+  // never claim an equality the triangle doesn't have.
+  renderEqualTicks() {
+    const g = el("g");
+    const lengths = this.sides();
+    const groups = []; // [{ len, indices }]
+    lengths.forEach((len, i) => {
+      const match = groups.find((grp) => Math.abs(grp.len - len) < 0.5);
+      if (match) match.indices.push(i);
+      else groups.push({ len, indices: [i] });
+    });
+
+    let markIndex = 0;
+    for (const grp of groups) {
+      if (grp.indices.length < 2) continue;
+      markIndex += 1;
+      for (const i of grp.indices) {
+        const a = this.points[i];
+        const b = this.points[(i + 1) % 3];
+        const mid = midpoint(a, b);
+        const len = dist(a, b) || 1;
+        const ux = (b.x - a.x) / len;
+        const uy = (b.y - a.y) / len;
+        for (let t = 0; t < markIndex; t++) {
+          const off = (t - (markIndex - 1) / 2) * 5;
+          const c = { x: mid.x + ux * off, y: mid.y + uy * off };
+          g.appendChild(
+            el("line", {
+              x1: c.x - uy * 5,
+              y1: c.y + ux * 5,
+              x2: c.x + uy * 5,
+              y2: c.y - ux * 5,
+              class: "equal-length-tick",
+            })
+          );
+        }
+      }
+    }
+    return g;
   }
 
   // Extends the side (i-1 -> i) beyond vertex i, and labels the angle between

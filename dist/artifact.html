@@ -1615,6 +1615,10 @@ class Triangle {
     this.cevianLengthOverride = undefined;
     this.cevianPointLabels = ["D", "E"];
     this.fillId = "cream";
+    this.showTicks = true; // tick marks wherever two sides are genuinely equal
+    this.showVertexLabels = true;
+    // Set when an edit was refused as geometrically impossible, for the caller to report.
+    this.lastRefusal = null;
     this.selected = false;
     this.group = null;
     this.controller = null;
@@ -1716,6 +1720,19 @@ class Triangle {
       return;
     }
 
+    // One locked angle: hold it exactly and solve the side around it. Without this,
+    // a right angle plus a leg plus the hypotenuse -- the ordinary Pythagoras setup --
+    // silently bent the right angle to something like 93.6 degrees.
+    if (lockedAngles.length === 1) {
+      if (!this.solveSideWithLockedAngle(lockedAngles[0], sideIndex)) {
+        const sideName = `${this.labels[sideIndex]}${this.labels[(sideIndex + 1) % 3]}`;
+        this.lastRefusal = `${sideName}=${round1(newLengthUnits)} is impossible alongside the values already locked`;
+        this.clearSideLock(sideIndex);
+      }
+      this.verifyLocks();
+      return;
+    }
+
     let lockedIdx = [0, 1, 2].filter((i) => this.sideLockUnits[i] != null);
     if (lockedIdx.length === 3) {
       const oldest = this._lockOrder.find((t) => t.startsWith("side:"));
@@ -1729,6 +1746,54 @@ class Triangle {
       this.applySideMove(sideIndex, newLengthUnits);
     }
     this.verifyLocks();
+  }
+
+  // With exactly one angle locked, at vertex v: vertex v and the directions of both
+  // rays leaving it stay put (which is what keeps that angle exact), and one far point
+  // slides along its own ray until the requested side measures what it should.
+  //
+  // For a side touching v that's a straight slide. For the side opposite v it's the
+  // intersection of a ray with a circle -- a quadratic that has no solution when the
+  // requested length is shorter than the perpendicular distance to the ray, which is
+  // precisely the case where no such triangle exists. Returns false there instead of
+  // quietly bending the locked angle to make the numbers fit.
+  solveSideWithLockedAngle(v, sideIndex) {
+    const target = this.sideLockUnits[sideIndex] * PX_PER_UNIT;
+    const V = this.points[v];
+    const a = (v + 1) % 3; // far point of side v
+    const b = (v + 2) % 3; // far point of side (v+2)%3
+
+    if (sideIndex === v || sideIndex === (v + 2) % 3) {
+      const far = sideIndex === v ? a : b;
+      this.points[far] = pointOnRay(V, this.points[far], target);
+      return true;
+    }
+
+    // The opposite side: slide whichever far point isn't itself pinned by a side lock.
+    const aPinned = this.sideLockUnits[v] != null;
+    const bPinned = this.sideLockUnits[(v + 2) % 3] != null;
+    const slide = aPinned && !bPinned ? b : !aPinned && bPinned ? a : b;
+    const keep = slide === a ? b : a;
+    const t = this.rayDistanceForLength(V, this.points[slide], this.points[keep], target);
+    if (t == null) return false;
+    this.points[slide] = pointOnRay(V, this.points[slide], t);
+    return true;
+  }
+
+  // Distance t along the ray V->along at which the point sits exactly `target` from P.
+  rayDistanceForLength(V, along, P, target) {
+    const len = dist(V, along) || 1;
+    const u = { x: (along.x - V.x) / len, y: (along.y - V.y) / len };
+    const w = { x: V.x - P.x, y: V.y - P.y };
+    const wu = w.x * u.x + w.y * u.y;
+    const disc = wu * wu - (w.x * w.x + w.y * w.y) + target * target;
+    if (disc < 0) return null;
+    const root = Math.sqrt(disc);
+    const candidates = [-wu + root, -wu - root].filter((t) => t > 1e-6);
+    if (!candidates.length) return null;
+    // Two positive roots means the classic ambiguous case; take the one nearest the
+    // current shape so the triangle doesn't flip to its other solution unasked.
+    return candidates.reduce((best, t) => (Math.abs(t - len) < Math.abs(best - len) ? t : best));
   }
 
   // Uniformly rescales the whole triangle about vertex p (one of the 2 locked-angle
@@ -1888,6 +1953,20 @@ class Triangle {
     }
     fields.push({ key: "fill", group: "Appearance", label: "Fill", kind: "swatch", value: this.fillId });
     fields.push({
+      key: "show-ticks",
+      group: "Appearance",
+      label: "Equal-side ticks",
+      kind: "toggle",
+      value: this.showTicks,
+    });
+    fields.push({
+      key: "show-vertex-labels",
+      group: "Appearance",
+      label: "Vertex letters",
+      kind: "toggle",
+      value: this.showVertexLabels,
+    });
+    fields.push({
       key: "cevian-toggle",
       group: "Parallel segment",
       label: "Show",
@@ -1960,6 +2039,16 @@ class Triangle {
   setField(key, value) {
     if (key === "scale-factor") {
       this.applyScale(Number(value));
+      return;
+    }
+    if (key === "show-ticks") {
+      this.showTicks = Boolean(value);
+      this.notifyChange();
+      return;
+    }
+    if (key === "show-vertex-labels") {
+      this.showVertexLabels = Boolean(value);
+      this.notifyChange();
       return;
     }
     const [kind, idxStr] = key.split("-");
@@ -2138,6 +2227,8 @@ class Triangle {
       if (this.exteriorExtended[i]) this.group.appendChild(this.renderExteriorAngle(i, angles[i]));
     }
 
+    if (this.showTicks) this.group.appendChild(this.renderEqualTicks());
+
     // side length labels
     for (let i = 0; i < 3; i++) {
       const from = this.points[i];
@@ -2149,7 +2240,7 @@ class Triangle {
 
     // vertex handles + labels
     for (let i = 0; i < 3; i++) {
-      this.group.appendChild(this.renderVertexLabel(i, centroid));
+      if (this.showVertexLabels) this.group.appendChild(this.renderVertexLabel(i, centroid));
       this.group.appendChild(this.renderVertexHandle(i));
     }
 
@@ -2174,6 +2265,9 @@ class Triangle {
     const group = el("g");
 
     if (hidden) {
+      // A right angle keeps its square even with the number hidden -- the square IS
+      // the statement, and a right-angled triangle with no mark on it reads wrong.
+      if (isRight) group.appendChild(this.rightAngleMark(V, dirF, dirR));
       group.appendChild(
         renderRemovableLabel({
           x: lp.x,
@@ -2186,18 +2280,7 @@ class Triangle {
     }
 
     if (isRight) {
-      const size = 14;
-      const uF = { x: Math.cos(dirF), y: Math.sin(dirF) };
-      const uR = { x: Math.cos(dirR), y: Math.sin(dirR) };
-      const p1 = { x: V.x + uF.x * size, y: V.y + uF.y * size };
-      const p2 = { x: V.x + uF.x * size + uR.x * size, y: V.y + uF.y * size + uR.y * size };
-      const p3 = { x: V.x + uR.x * size, y: V.y + uR.y * size };
-      group.appendChild(
-        el("path", {
-          d: `M ${p1.x} ${p1.y} L ${p2.x} ${p2.y} L ${p3.x} ${p3.y}`,
-          class: "right-angle-mark",
-        })
-      );
+      group.appendChild(this.rightAngleMark(V, dirF, dirR));
       return group;
     }
 
@@ -2224,6 +2307,62 @@ class Triangle {
       })
     );
     return group;
+  }
+
+  rightAngleMark(V, dirF, dirR) {
+    const size = 14;
+    const uF = { x: Math.cos(dirF), y: Math.sin(dirF) };
+    const uR = { x: Math.cos(dirR), y: Math.sin(dirR) };
+    const p1 = { x: V.x + uF.x * size, y: V.y + uF.y * size };
+    const p2 = { x: V.x + uF.x * size + uR.x * size, y: V.y + uF.y * size + uR.y * size };
+    const p3 = { x: V.x + uR.x * size, y: V.y + uR.y * size };
+    return el("path", {
+      d: `M ${p1.x} ${p1.y} L ${p2.x} ${p2.y} L ${p3.x} ${p3.y}`,
+      class: "right-angle-mark",
+    });
+  }
+
+  // Tick marks on sides that are genuinely the same length -- the notation that says
+  // "isosceles" without repeating the number, and the reason an unlabelled equal side
+  // still carries information. Sides are grouped by measured length, so the marks can
+  // never claim an equality the triangle doesn't have.
+  renderEqualTicks() {
+    const g = el("g");
+    const lengths = this.sides();
+    const groups = []; // [{ len, indices }]
+    lengths.forEach((len, i) => {
+      const match = groups.find((grp) => Math.abs(grp.len - len) < 0.5);
+      if (match) match.indices.push(i);
+      else groups.push({ len, indices: [i] });
+    });
+
+    let markIndex = 0;
+    for (const grp of groups) {
+      if (grp.indices.length < 2) continue;
+      markIndex += 1;
+      for (const i of grp.indices) {
+        const a = this.points[i];
+        const b = this.points[(i + 1) % 3];
+        const mid = midpoint(a, b);
+        const len = dist(a, b) || 1;
+        const ux = (b.x - a.x) / len;
+        const uy = (b.y - a.y) / len;
+        for (let t = 0; t < markIndex; t++) {
+          const off = (t - (markIndex - 1) / 2) * 5;
+          const c = { x: mid.x + ux * off, y: mid.y + uy * off };
+          g.appendChild(
+            el("line", {
+              x1: c.x - uy * 5,
+              y1: c.y + ux * 5,
+              x2: c.x + uy * 5,
+              y2: c.y - ux * 5,
+              class: "equal-length-tick",
+            })
+          );
+        }
+      }
+    }
+    return g;
   }
 
   // Extends the side (i-1 -> i) beyond vertex i, and labels the angle between
@@ -4504,6 +4643,9 @@ class Quadrilateral {
     this.labels = ["A", "B", "C", "D"];
     this.showLabels = false;
     this.showHeight = false; // perpendicular height, the parallelogram-area cue
+    // Equal-opposite-side ticks: true information, but on a plain labelled rectangle
+    // it's information the shape already carries, so it can be switched off.
+    this.showTicks = true;
     this.dimensionStyle = true; // arrows outside the shape rather than plain edge text
     this.overrides = {}; // base | side | height | angle -> "" hidden, or custom text
     this.selected = false;
@@ -4650,6 +4792,7 @@ class Quadrilateral {
       value: this.dimensionStyle,
     });
     fields.push({ key: "show-labels", group: "Appearance", label: "Corner labels", kind: "toggle", value: this.showLabels });
+    fields.push({ key: "show-ticks", group: "Appearance", label: "Equal-side ticks", kind: "toggle", value: this.showTicks });
     return fields;
   }
 
@@ -4674,6 +4817,11 @@ class Quadrilateral {
     }
     if (key === "show-labels") {
       this.showLabels = Boolean(value);
+      this.notifyChange();
+      return;
+    }
+    if (key === "show-ticks") {
+      this.showTicks = Boolean(value);
       this.notifyChange();
       return;
     }
@@ -4749,7 +4897,7 @@ class Quadrilateral {
 
     this.renderEdgeMeasure("base", pts[0], pts[1], this.baseUnits(), pts);
     this.renderEdgeMeasure("side", pts[1], pts[2], this.sideUnits(), pts);
-    this.renderEqualTicks(pts);
+    if (this.showTicks) this.renderEqualTicks(pts);
 
     if (this.showLabels) this.renderCornerLabels(pts);
     this.renderHandles(pts);
@@ -6145,21 +6293,43 @@ function buildDiagram(items) {
 
 const SHAPE_LIST = "try triangle, rect, para, polygon, circle, sector, prism, parallel or path";
 
+// Every measurement a shape can print next to itself. A spec'd diagram labels only
+// the ones the spec actually mentions and stays silent about the rest -- because a
+// diagram that labels everything answers its own question, and only the person
+// writing the question knows which number is the given and which is the answer.
+// (Everything stays there to be switched back on: a hidden label leaves a small plus.)
+const LABEL_KEYS = {
+  triangle: ["angle-0", "angle-1", "angle-2", "side-0", "side-1", "side-2"],
+  quadrilateral: ["base", "side", "angle", "height"],
+  polygon: ["side"],
+  circle: ["radius", "angle", "arc"],
+  prism: ["width", "height", "depth", "side"],
+};
+
 function buildShape(item, warnings) {
   const { type, args, points } = item;
   const note = (key) => warnings.push(`Ignored "${key}" on ${type}`);
+  const mentioned = new Set();
+  const mark = (...keys) => keys.forEach((k) => mentioned.add(k));
 
-  if (type === "triangle") return buildTriangle(args, note);
-  if (type === "rect" || type === "rectangle" || type === "square") return buildQuad(args, note, "rectangle", type === "square");
-  if (type === "para" || type === "parallelogram") return buildQuad(args, note, "parallelogram", false);
-  if (type === "polygon" || type === "pentagon" || type === "hexagon" || type === "octagon") {
-    return buildPolygon(type, args, note);
-  }
-  if (type === "circle" || type === "sector" || type === "arc") return buildCircle(type, args, note);
-  if (type === "prism") return buildPrism(args, note);
-  if (type === "parallel" || type === "lines") return buildParallel(args, note);
-  if (type === "path" || type === "shape") return buildPath(points, args, note);
-  return null;
+  const warn = (message) => warnings.push(message);
+
+  let shape = null;
+  if (type === "triangle") shape = buildTriangle(args, note, mark, warn);
+  else if (type === "rect" || type === "rectangle" || type === "square")
+    shape = buildQuad(args, note, mark, "rectangle", type === "square");
+  else if (type === "para" || type === "parallelogram") shape = buildQuad(args, note, mark, "parallelogram", false);
+  else if (type === "polygon" || type === "pentagon" || type === "hexagon" || type === "octagon")
+    shape = buildPolygon(type, args, note, mark);
+  else if (type === "circle" || type === "sector" || type === "arc") shape = buildCircle(type, args, note, mark);
+  else if (type === "prism") shape = buildPrism(args, note, mark);
+  else if (type === "parallel" || type === "lines") shape = buildParallel(args, note);
+  else if (type === "path" || type === "shape") shape = buildPath(points, args, note);
+  if (!shape) return null;
+
+  const labelKeys = LABEL_KEYS[shape.type];
+  if (labelKeys) for (const key of labelKeys) if (!mentioned.has(key)) shape.setField(key, "");
+  return shape;
 }
 
 // --- per-shape builders ---------------------------------------------------
@@ -6168,37 +6338,73 @@ function buildShape(item, warnings) {
 // locks two angles and then scales to the side, which is a different (and correct)
 // construction from doing it the other way round.
 
-function buildTriangle(args, note) {
+function buildTriangle(args, note, mark, warn) {
   const t = new Triangle({});
+  t.showVertexLabels = false; // letters only when the spec asks for them
   const ANGLES = { a: 0, b: 1, c: 2 };
   const SIDES = { ab: 0, bc: 1, ca: 2 };
   for (const [key, value] of args) {
-    if (key in ANGLES) t.setField(`angle-${ANGLES[key]}`, value);
-    else if (key in SIDES) t.setField(`side-${SIDES[key]}`, value);
-    else if (key === "labels") splitList(value).forEach((l, i) => t.setField(`label-${i}`, l));
-    else if (key === "ext") for (const which of splitList(value)) t.setField(`ext-toggle-${vertexIndex(which, t.labels)}`, true);
+    // A value the triangle refused (no such triangle exists) is reported rather than
+    // quietly fudged into one that does.
+    if (t.lastRefusal) {
+      warn(t.lastRefusal);
+      t.lastRefusal = null;
+    }
+    if (key in ANGLES) {
+      t.setField(`angle-${ANGLES[key]}`, value);
+      mark(`angle-${ANGLES[key]}`);
+    } else if (key in SIDES) {
+      t.setField(`side-${SIDES[key]}`, value);
+      mark(`side-${SIDES[key]}`);
+    } else if (key === "labels") {
+      t.showVertexLabels = value !== "off";
+      if (value !== true && value !== "off") splitList(value).forEach((l, i) => t.setField(`label-${i}`, l));
+    } else if (key === "ext") {
+      for (const which of splitList(value)) t.setField(`ext-toggle-${vertexIndex(which, t.labels)}`, true);
+    } else if (key === "ticks") t.setField("show-ticks", value !== "off");
     else if (key === "seg") {
       t.setField("cevian-toggle", true);
       if (value !== true) t.setField("cevian-t", value);
     } else if (key === "fill") t.setField("fill", value);
     else note(key);
   }
+  if (t.lastRefusal) {
+    warn(t.lastRefusal);
+    t.lastRefusal = null;
+  }
   return t;
 }
 
-function buildQuad(args, note, mode, isSquare) {
+function buildQuad(args, note, mark, mode, isSquare) {
   const q = new Quadrilateral({ mode });
+  // A labelled rectangle's opposite sides are equal by definition -- ticks saying so
+  // are just more ink, so they're opt-in here.
+  q.showTicks = false;
   if (mode === "parallelogram") q.setField("mode-parallelogram", true);
   for (const [key, value] of args) {
-    if (key === "w" || key === "width" || key === "base") q.setField("base", value);
-    else if (key === "h" || key === "height" || key === "side") {
+    if (key === "w" || key === "width" || key === "base") {
+      q.setField("base", value);
+      mark("base");
+    } else if (key === "h" || key === "height" || key === "side") {
       // On a parallelogram a bare `height` flag shows the perpendicular height, while
       // `height=4` sets it; on a rectangle the two are the same measurement.
-      if (value === true) q.setField("show-height", true);
-      else if (key === "height" && mode === "parallelogram") q.setField("height", value);
-      else q.setField("side", value);
-    } else if (key === "angle") q.setField("angle", value);
+      if (value === true) {
+        q.setField("show-height", true);
+        mark("height");
+      } else if (key === "height" && mode === "parallelogram") {
+        q.setField("show-height", true);
+        q.setField("height", value);
+        mark("height");
+      } else {
+        q.setField("side", value);
+        mark("side");
+      }
+    } else if (key === "angle") {
+      q.setField("angle", value);
+      mark("angle");
+    }
     else if (key === "rot" || key === "rotation") q.setField("rotation", value);
+    else if (key === "ticks") q.setField("show-ticks", value !== "off");
     else if (key === "labels") q.setField("show-labels", value !== "off");
     else if (key === "arrows") q.setField("dimension-style", value !== "off");
     else if (key === "fill") q.setField("fill", value);
@@ -6208,14 +6414,16 @@ function buildQuad(args, note, mode, isSquare) {
   return q;
 }
 
-function buildPolygon(type, args, note) {
+function buildPolygon(type, args, note, mark) {
   const preset = { pentagon: 5, hexagon: 6, octagon: 8 }[type];
   const p = new RegularPolygon({});
   if (preset) p.setField("sides", preset);
   for (const [key, value] of args) {
     if (key === "n" || key === "sides") p.setField("sides", value);
-    else if (key === "side") p.setField("side", value);
-    else if (key === "r" || key === "radius") p.setField("radius", value);
+    else if (key === "side") {
+      p.setField("side", value);
+      mark("side");
+    } else if (key === "r" || key === "radius") p.setField("radius", value);
     else if (key === "rot" || key === "rotation") p.setField("rotation", value);
     else if (key === "labels") p.setField("show-labels", value !== "off");
     else if (key === "mark" || key === "angle") p.setField("show-interior", value !== "off");
@@ -6226,7 +6434,7 @@ function buildPolygon(type, args, note) {
   return p;
 }
 
-function buildCircle(type, args, note) {
+function buildCircle(type, args, note, mark) {
   const c = new Circle({});
   if (type === "sector") c.setField("mode-sector", true);
   if (type === "arc") c.setField("mode-arc", true);
@@ -6234,10 +6442,16 @@ function buildCircle(type, args, note) {
     if (key === "r" || key === "radius") {
       if (value === true) c.setField("show-radius", true);
       else c.setField("radius", value);
-    } else if (key === "d" || key === "diameter") c.setField("as-diameter", value !== "off");
-    else if (key === "angle") c.setField("angle", value);
-    else if (key === "arc") {
+      mark("radius");
+    } else if (key === "d" || key === "diameter") {
+      c.setField("as-diameter", value !== "off");
+      mark("radius");
+    } else if (key === "angle") {
+      c.setField("angle", value);
+      mark("angle");
+    } else if (key === "arc") {
       if (value !== true) c.setField("arc", value);
+      mark("arc");
     } else if (key === "fill") c.setField("fill", value);
     else note(key);
   }
@@ -6246,7 +6460,7 @@ function buildCircle(type, args, note) {
 
 const PRISM_BASES = { rect: "rectangle", rectangle: "rectangle", tri: "triangle", triangle: "triangle", para: "parallelogram", parallelogram: "parallelogram", poly: "polygon", polygon: "polygon" };
 
-function buildPrism(args, note) {
+function buildPrism(args, note, mark) {
   const p = new Prism({});
   // The base has to be settled first: which measurements even exist depends on it.
   const baseArg = args.find(([k]) => k === "base");
@@ -6257,16 +6471,25 @@ function buildPrism(args, note) {
   }
   for (const [key, value] of args) {
     if (key === "base") continue;
-    else if (key === "w" || key === "width") p.setField("width", value);
-    else if (key === "h") p.setField("height", value);
-    else if (key === "height") {
+    else if (key === "w" || key === "width") {
+      p.setField("width", value);
+      mark("width");
+    } else if (key === "h") {
+      p.setField("height", value);
+      mark("height");
+    } else if (key === "height") {
       if (value === true) p.setField("show-apex-height", true);
       else p.setField("height", value);
-    } else if (key === "depth" || key === "d") p.setField("depth", value);
-    else if (key === "angle") p.setField("slant", value);
+      mark("height");
+    } else if (key === "depth" || key === "d") {
+      p.setField("depth", value);
+      mark("depth");
+    } else if (key === "angle") p.setField("slant", value);
     else if (key === "n" || key === "sides") p.setField("sides", value);
-    else if (key === "side") p.setField("side", value);
-    else if (key === "r" || key === "radius") p.setField("radius", value);
+    else if (key === "side") {
+      p.setField("side", value);
+      mark("side");
+    } else if (key === "r" || key === "radius") p.setField("radius", value);
     else if (key === "da" || key === "view") p.setField("depth-angle", value);
     else if (key === "hidden") p.setField("hidden-edges", value !== "off");
     else if (key === "fill") p.setField("fill", value);
@@ -6275,8 +6498,22 @@ function buildPrism(args, note) {
   return p;
 }
 
+// Crossing angles are addressed as L<line><slot>, or T<transversal>L<line><slot> when
+// there's more than one transversal. Slots run anticlockwise from below-right:
+// a = below-right, b = below-left, c = above-left, d = above-right.
+function parseAngleAddress(token) {
+  const m = /^(?:t(\d+))?l(\d+)([a-d])$/i.exec(String(token).trim());
+  if (!m) return null;
+  const j = m[1] ? Number(m[1]) - 1 : 0;
+  const k = Number(m[2]) - 1;
+  const s = "abcd".indexOf(m[3].toLowerCase());
+  return j >= 0 && k >= 0 ? `disp-T${j}-L${k}-${s}` : null;
+}
+
 function buildParallel(args, note) {
   const pl = new ParallelLines({});
+  let show = null;
+  const unknowns = [];
   for (const [key, value] of args) {
     if (key === "angle") pl.setField("trans-angle-0", value);
     else if (key === "angle2") pl.setField("trans-angle-1", value);
@@ -6284,7 +6521,44 @@ function buildParallel(args, note) {
     else if (key === "gap") pl.setField("gap", value);
     else if (key === "lines") pl.setField("add-line", Number(value) >= 3);
     else if (key === "transversals" || key === "trans") pl.setField("add-transversal", Number(value) >= 2);
+    else if (key === "show") show = String(value);
+    else if (key === "x" || key === "unknown") unknowns.push(...splitList(value));
     else note(key);
+  }
+
+  // Four angles at every crossing means up to 24 numbers on one diagram, which turns
+  // a question into its own answer key. Only the given angle is labelled unless the
+  // spec asks for more.
+  const everyKey = [];
+  for (let j = 0; j < pl.transversals.length; j++) {
+    for (let k = 0; k < pl.lineCount; k++) {
+      for (let s = 0; s < 4; s++) everyKey.push(`disp-T${j}-L${k}-${s}`);
+    }
+  }
+
+  const showKeys = new Set();
+  if (show === "all") everyKey.forEach((key) => showKeys.add(key));
+  else if (show) {
+    for (const token of splitList(show)) {
+      const key = parseAngleAddress(token);
+      if (key) showKeys.add(key);
+      else note(`show=${token}`);
+    }
+  } else {
+    showKeys.add("disp-T0-L0-0"); // slot a of the first crossing IS the given angle
+  }
+
+  const labelled = new Map();
+  for (const token of unknowns) {
+    const [addr, text] = String(token).split(":");
+    const key = parseAngleAddress(addr);
+    if (key) labelled.set(key, text || "x");
+    else note(`x=${token}`);
+  }
+
+  for (const key of everyKey) {
+    if (labelled.has(key)) pl.setField(key, labelled.get(key));
+    else if (!showKeys.has(key)) pl.setField(key, "");
   }
   return pl;
 }
@@ -6441,8 +6715,8 @@ Lengths are in units, angles in degrees. Bare words are flags; \`key=value\` set
 
 | Shape | Keys |
 |---|---|
-| \`triangle\` | \`a= b= c=\` angles at vertices 1/2/3, \`ab= bc= ca=\` sides, \`labels=P,Q,R\`, \`ext=A\` exterior angle, \`seg\` or \`seg=0.6\` internal parallel segment |
-| \`rect\` | \`w= h=\`, \`labels\`, \`arrows=off\`, \`rot=\` |
+| \`triangle\` | \`a= b= c=\` angles at vertices 1/2/3, \`ab= bc= ca=\` sides, \`labels\` or \`labels=P,Q,R\` vertex letters, \`ext=A\` exterior angle, \`ticks=off\`, \`seg\` or \`seg=0.6\` internal parallel segment |
+| \`rect\` | \`w= h=\`, \`labels\`, \`ticks\` equal-side marks, \`arrows=off\`, \`rot=\` |
 | \`para\` | \`w= h= angle=\`, \`height\` (draw perpendicular height) or \`height=4\` (set it), \`rot=\` |
 | \`polygon\` | \`n= side=\` or \`r=\`, \`mark\` (interior angle), \`labels\`, \`ticks=off\`, \`rot=\` |
 | \`pentagon\` \`hexagon\` \`octagon\` | same as polygon with \`n\` preset |
@@ -6450,10 +6724,31 @@ Lengths are in units, angles in degrees. Bare words are flags; \`key=value\` set
 | \`sector\` | \`r= angle=\`, \`arc=\` (set arc length), \`radius\` |
 | \`arc\` | \`r= angle=\` |
 | \`prism\` | \`base=rect\\|tri\\|para\\|poly\`, \`w= h= depth=\`, \`angle=\` (para base), \`n= side=\` (poly base), \`hidden\` (hidden edges), \`height\` (perp height, tri base), \`da=\` (viewing angle) |
-| \`parallel\` | \`angle=\` transversal angle, \`dir=\`, \`gap=\`, \`lines=3\`, \`transversals=2\` |
+| \`parallel\` | \`angle=\` transversal angle, \`dir=\`, \`gap=\`, \`lines=3\`, \`transversals=2\`, \`show=\` which crossing angles to label, \`x=\` which to mark unknown |
 | \`path\` | \`x,y x,y x,y ...\` then \`close\`, for composite/L-shaped outlines. y points UP. Corner angles and parallel/equal marks start hidden; add \`angles\` or \`marks\` to show them. |
 
 Every shape also takes \`fill=\` one of \`cream green blue rose violet amber slate none\`.
+
+## What gets labelled — the rule that matters
+
+**Only what you write is labelled.** Everything else is drawn correctly and left
+silent. A diagram that labels every side and angle hands over the answer, and only the
+person writing the question knows which number is the given and which is the answer, so
+that decision is yours on every line.
+
+\`\`\`
+triangle a=90 b=35 ab=8       # three labels: two angles and one side
+triangle a=90 ab=8            # two labels; the other angles are still exactly right
+triangle a=90 b=35 ab=8 ca=x  # "find x" -- a letter labels a side without resizing it
+\`\`\`
+
+So: write the givens, write the unknown as a letter, and write nothing else. If a
+measurement is wanted later, the teacher clicks the small plus where it would sit.
+
+Two things the tool marks on its own, because they are geometry rather than pedagogy:
+a right angle keeps its square, and sides that are genuinely equal get matching ticks
+(\`ticks=off\` to suppress) — which is how to show "these two are equal" without
+labelling either of them.
 
 ## Things worth knowing
 
@@ -6462,13 +6757,18 @@ Every shape also takes \`fill=\` one of \`cream green blue rose violet amber sla
 - Anything unspecified keeps a sensible default; unknown keys are reported, not fatal.
 - Every quoted number is measured off the actual drawing, so a diagram is never
   labelled with something its geometry doesn't support.
-- To mark a length as unknown (\`x\`) or hide it, the teacher clicks the label in the app.
+- On a \`parallel\` diagram only the given angle is labelled. Address the others as
+  \`L<line><slot>\` (\`T<transversal>L<line><slot>\` with two transversals), where the
+  slots run anticlockwise from below-right: \`a\` below-right, \`b\` below-left,
+  \`c\` above-left, \`d\` above-right. So \`parallel angle=115 x=L2c\` gives one known
+  angle and one to find; \`show=all\` labels every one.
 
 ## Examples
 
 \`\`\`
 triangle a=90 b=35 ab=8              # right-angled, 35 deg at B
-triangle a=80 b=80 ab=6 fill=blue    # isosceles
+triangle a=80 b=80 ab=6 fill=blue    # isosceles: equal sides get ticks, unlabelled
+triangle a=90 ab=6 bc=8 ca=x         # Pythagoras: two givens and the unknown
 rect w=12 h=7 fill=cream             # area / perimeter
 para w=9 h=5 angle=60 height         # parallelogram with perpendicular height
 polygon n=8 side=4 mark labels       # regular octagon, interior angle marked
@@ -6476,7 +6776,7 @@ circle r=6.5 d                       # circle labelled by its diameter
 sector r=5 angle=120 arc=            # sector showing its arc length
 prism base=rect w=8 h=4 depth=12 hidden
 prism base=poly n=6 side=3 depth=10 hidden
-parallel angle=115 lines=3 transversals=2
+parallel angle=115 x=L2c             # co-interior angles: one given, one to find
 path 0,0 10,0 10,4 6,4 6,7 0,7 close fill=cream   # L-shaped composite
 \`\`\`
 

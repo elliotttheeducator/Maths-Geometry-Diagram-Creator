@@ -23,6 +23,9 @@ export class Quadrilateral {
     this.labels = ["A", "B", "C", "D"];
     this.showLabels = false;
     this.showHeight = false; // perpendicular height, the parallelogram-area cue
+    // Equal-opposite-side ticks: true information, but on a plain labelled rectangle
+    // it's information the shape already carries, so it can be switched off.
+    this.showTicks = true;
     this.dimensionStyle = true; // arrows outside the shape rather than plain edge text
     this.overrides = {}; // base | side | height | angle -> "" hidden, or custom text
     this.selected = false;
@@ -169,6 +172,7 @@ export class Quadrilateral {
       value: this.dimensionStyle,
     });
     fields.push({ key: "show-labels", group: "Appearance", label: "Corner labels", kind: "toggle", value: this.showLabels });
+    fields.push({ key: "show-ticks", group: "Appearance", label: "Equal-side ticks", kind: "toggle", value: this.showTicks });
     return fields;
   }
 
@@ -193,6 +197,11 @@ export class Quadrilateral {
     }
     if (key === "show-labels") {
       this.showLabels = Boolean(value);
+      this.notifyChange();
+      return;
+    }
+    if (key === "show-ticks") {
+      this.showTicks = Boolean(value);
       this.notifyChange();
       return;
     }
@@ -268,7 +277,7 @@ export class Quadrilateral {
 
     this.renderEdgeMeasure("base", pts[0], pts[1], this.baseUnits(), pts);
     this.renderEdgeMeasure("side", pts[1], pts[2], this.sideUnits(), pts);
-    this.renderEqualTicks(pts);
+    if (this.showTicks) this.renderEqualTicks(pts);
 
     if (this.showLabels) this.renderCornerLabels(pts);
     this.renderHandles(pts);
