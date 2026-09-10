@@ -2,6 +2,7 @@ import { round1, nextId, PX_PER_UNIT, clamp, midpoint } from "../geometry.js";
 import { el, clear, toSvgPoint, renderRemovableLabel } from "../svgUtil.js";
 import { parseFieldInput } from "../fieldInput.js";
 import { faceFill } from "../palette.js";
+import { applyLabelScale, gap, extentOf, labelOffset, spreadLabels } from "../labelScale.js";
 
 const DEG = Math.PI / 180;
 
@@ -311,9 +312,14 @@ export class Prism {
     if (this.group) this.group.remove();
   }
 
+  extentPx() {
+    return extentOf([...this.frontFace(), ...this.backFace()]);
+  }
+
   render() {
     if (!this.group) return;
     clear(this.group);
+    applyLabelScale(this.group, this.extentPx());
     const front = this.frontFace();
     const back = this.backFace();
     const d = this.depthVector();
@@ -371,6 +377,8 @@ export class Prism {
 
     this.renderMeasurements(front, back);
     this.renderHandles(front, back);
+ 
+    spreadLabels(this.group, this.extentPx());
   }
 
   renderApexHeight(front) {
@@ -422,10 +430,16 @@ export class Prism {
     const hidden = override === "";
     const computed = round1(computedUnits);
     const displayValue = override !== undefined && override !== "" ? override : computed;
+    // The caller gives a direction; how far to go along it depends on how wide the
+    // label is and how big the solid is.
+    const dirLen = Math.hypot(offset.x, offset.y) || 1;
+    const nx = offset.x / dirLen;
+    const ny = offset.y / dirLen;
+    const off = labelOffset(displayValue, this.extentPx(), nx, ny, 10);
     this.group.appendChild(
       renderRemovableLabel({
-        x: at.x + offset.x,
-        y: at.y + offset.y,
+        x: at.x + nx * off,
+        y: at.y + ny * off,
         value: displayValue,
         hidden,
         cssClass: "side-label",

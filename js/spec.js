@@ -173,8 +173,8 @@ const SHAPE_LIST = "try triangle, rect, para, polygon, circle, sector, prism, pa
 export const SHAPE_KEYS = {
   triangle: {
     words: ["triangle", "tri"],
-    keys: "a b c ab bc ca right isosceles equilateral legs hyp base side sides labels ext ticks seg fill",
-    about: "angles a/b/c at each vertex, sides ab/bc/ca; or say right, isosceles, equilateral with legs=/hyp=/base=/side=",
+    keys: "a b c ab bc ca right isosceles equilateral legs hyp base side sides height h hfrom labels ext ticks seg fill",
+    about: "angles a/b/c, sides ab/bc/ca; or right/isosceles/equilateral with legs=/hyp=/base=/side=; height[=4] draws the perpendicular height (hfrom=B picks the vertex)",
   },
   rect: {
     words: ["rect", "rectangle", "square"],
@@ -183,8 +183,8 @@ export const SHAPE_KEYS = {
   },
   para: {
     words: ["para", "parallelogram"],
-    keys: "w h width height base side angle rot rotation ticks labels arrows fill",
-    about: "w= h= angle=, plus height to draw the perpendicular height",
+    keys: "w h width height outside base side angle rot rotation ticks labels arrows fill",
+    about: "w= h= angle=, height[=4] to draw the perpendicular height, outside to draw it off the extended base",
   },
   polygon: {
     words: ["polygon", "pentagon", "hexagon", "octagon"],
@@ -274,7 +274,7 @@ function correctArgs(shapeName, args, warn) {
 // writing the question knows which number is the given and which is the answer.
 // (Everything stays there to be switched back on: a hidden label leaves a small plus.)
 const LABEL_KEYS = {
-  triangle: ["angle-0", "angle-1", "angle-2", "side-0", "side-1", "side-2"],
+  triangle: ["angle-0", "angle-1", "angle-2", "side-0", "side-1", "side-2", "height"],
   quadrilateral: ["base", "side", "angle", "height"],
   polygon: ["side"],
   circle: ["radius", "angle", "arc"],
@@ -401,6 +401,15 @@ function buildTriangle(args, note, mark, warn) {
           mark(`side-${i}`);
         });
       }
+    } else if (key === "height" || key === "h") {
+      // `height` draws the perpendicular height; `height=4` also sets it.
+      t.setField("show-height", true);
+      if (value !== true) t.setField("height", value);
+      mark("height");
+    } else if (key === "hfrom") {
+      t.setField("show-height", true);
+      t.setField(`height-from-${vertexIndex(value, t.labels)}`, true);
+      mark("height");
     } else if (key === "ticks") t.setField("show-ticks", value !== "off");
     else if (key === "seg") {
       t.setField("cevian-toggle", true);
@@ -444,7 +453,11 @@ function buildQuad(args, note, mark, mode, isSquare) {
       mark("angle");
     }
     else if (key === "rot" || key === "rotation") q.setField("rotation", value);
-    else if (key === "ticks") q.setField("show-ticks", value !== "off");
+    else if (key === "outside") {
+      q.setField("show-height", true);
+      q.setField("height-outside", value !== "off");
+      mark("height");
+    } else if (key === "ticks") q.setField("show-ticks", value !== "off");
     else if (key === "labels") q.setField("show-labels", value !== "off");
     else if (key === "arrows") q.setField("dimension-style", value !== "off");
     else if (key === "fill") q.setField("fill", value);

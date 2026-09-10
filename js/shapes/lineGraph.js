@@ -12,6 +12,7 @@ import {
 import { el, clear, toSvgPoint, renderRemovableLabel } from "../svgUtil.js";
 import { parseFieldInput } from "../fieldInput.js";
 import { paletteEntry, SHAPE_STROKE } from "../palette.js";
+import { applyLabelScale, gap, extentOf } from "../labelScale.js";
 
 const SNAP_DIST = 18;
 const RIGHT_ANGLE_TOLERANCE = 0.5;
@@ -691,9 +692,14 @@ export class LineGraph {
     if (this.group) this.group.remove();
   }
 
+  extentPx() {
+    return extentOf(this.vertices);
+  }
+
   render() {
     if (!this.group) return;
     clear(this.group);
+    applyLabelScale(this.group, this.extentPx());
     if (this.vertices.length === 0) return;
 
     const fillsLayer = el("g");

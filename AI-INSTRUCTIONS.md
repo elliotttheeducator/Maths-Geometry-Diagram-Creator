@@ -28,6 +28,8 @@ triangle right legs=6,8 hyp=x        # Pythagoras
 triangle sides=3,4,5                 # three sides -- solved exactly
 triangle isosceles base=6 legs=5
 triangle equilateral side=5
+triangle base=9 height=4             # area: base and perpendicular height
+para w=16 h=5.5 angle=65 height=5    # height drawn inside, right-angle box at the foot
 parallel angle=115 x=L2c             # co-interior angles
 ```
 
@@ -45,9 +47,9 @@ Lengths are in units, angles in degrees. Bare words are flags; `key=value` sets 
 
 | Shape | Keys |
 |---|---|
-| `triangle` | `a= b= c=` angles at vertices 1/2/3, `ab= bc= ca=` sides, `labels` or `labels=P,Q,R` vertex letters, `ext=A` exterior angle, `ticks=off`, `seg` or `seg=0.6` internal parallel segment |
+| `triangle` | `a= b= c=` angles at vertices 1/2/3, `ab= bc= ca=` sides, `height`/`height=4`/`hfrom=B` perpendicular height, `labels` or `labels=P,Q,R` vertex letters, `ext=A` exterior angle, `ticks=off`, `seg` or `seg=0.6` internal parallel segment |
 | `rect` | `w= h=`, `labels`, `ticks` equal-side marks, `arrows=off`, `rot=` |
-| `para` | `w= h= angle=`, `height` (draw perpendicular height) or `height=4` (set it), `rot=` |
+| `para` | `w= h= angle=`, `height` (draw perpendicular height) or `height=4` (set it), `outside` (draw it off the extended base), `rot=` |
 | `polygon` | `n= side=` or `r=`, `mark` (interior angle), `labels`, `ticks=off`, `rot=` |
 | `pentagon` `hexagon` `octagon` | same as polygon with `n` preset |
 | `circle` | `r=`, `d` (label as diameter), `radius` (draw the radius line) |
@@ -94,6 +96,18 @@ Two things the tool marks on its own, because they are geometry rather than peda
 a right angle keeps its square, and sides that are genuinely equal get matching ticks
 (`ticks=off` to suppress) — which is how to show "these two are equal" without
 labelling either of them.
+
+## Heights
+
+`height` on a triangle or parallelogram draws the perpendicular height the textbook
+way: a dashed line with a right-angle box where it meets the base. `height=4` also sets
+it. When the foot of the perpendicular falls off the end of the base -- every obtuse
+triangle, and `outside` on a parallelogram -- the base is extended with a dashed line
+to meet it, which is exactly how it's drawn in a book. `hfrom=B` picks which vertex of
+a triangle the height drops from.
+
+Every construction line is dashed, because none of them is an edge of the shape: heights,
+base extensions, radii and diameters all read as drawn-to-explain rather than drawn-as-part-of.
 
 ## Things worth knowing
 

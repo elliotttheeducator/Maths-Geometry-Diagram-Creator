@@ -455,16 +455,24 @@ button.danger-btn:hover:not(:disabled) {
 .angle-label {
   font-family: Georgia, "Times New Roman", "Nimbus Roman", serif;
   user-select: none;
+  /* Every label is painted with a white outline behind the glyphs, so a number that
+     sits over an edge, a dashed height or a fill still reads cleanly instead of being
+     cut through by the line underneath it. paint-order puts the stroke below the fill,
+     which is what makes it a halo rather than an outline. */
+  paint-order: stroke;
+  stroke: #ffffff;
+  stroke-width: calc(4px * var(--label-scale, 1));
+  stroke-linejoin: round;
 }
 
 .vertex-label {
-  font-size: 16px;
+  font-size: calc(16px * var(--label-scale, 1));
   font-style: italic;
   fill: var(--shape-stroke); /* fixed, not the chrome --text token -- see canvas note above */
 }
 
 .side-label, .angle-label {
-  font-size: 15px;
+  font-size: calc(15px * var(--label-scale, 1));
   fill: var(--shape-stroke);
   cursor: text;
 }

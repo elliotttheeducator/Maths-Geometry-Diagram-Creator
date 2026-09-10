@@ -2,6 +2,7 @@ import { dist, round1, nextId, PX_PER_UNIT, clamp } from "../geometry.js";
 import { el, clear, toSvgPoint, renderRemovableLabel } from "../svgUtil.js";
 import { parseFieldInput } from "../fieldInput.js";
 import { paletteEntry } from "../palette.js";
+import { applyLabelScale, gap, extentOf, labelOffset, spreadLabels } from "../labelScale.js";
 
 const DEG = Math.PI / 180;
 
@@ -212,9 +213,14 @@ export class Circle {
     if (this.group) this.group.remove();
   }
 
+  extentPx() {
+    return this.radiusPx * 2;
+  }
+
   render() {
     if (!this.group) return;
     clear(this.group);
+    applyLabelScale(this.group, this.extentPx());
     const fill = paletteEntry(this.fillId).fill;
     const cls = `shape-poly${this.selected ? " selected" : ""}`;
     const start = this.pointAt(this.startAngleDeg);
@@ -240,6 +246,7 @@ export class Circle {
     if (this.mode !== "circle") this.renderAngleMark();
     if (this.showRadius) this.renderRadius();
     if (this.mode !== "circle") this.renderArcLabel();
+    spreadLabels(this.group, this.extentPx());
 
     // centre dot, and handles: one to size the radius, one to sweep the angle
     this.group.appendChild(
@@ -272,14 +279,19 @@ export class Circle {
       to = this.pointAt(angle);
     }
     this.group.appendChild(
-      el("line", { x1: from.x, y1: from.y, x2: to.x, y2: to.y, class: "shape-line radius-line" })
+      // A radius or diameter isn't an edge of the shape -- it's a construction line
+      // drawn to explain a measurement, so it's dashed like every other one.
+      el("line", { x1: from.x, y1: from.y, x2: to.x, y2: to.y, class: "construction-line radius-line" })
     );
 
     const mid = { x: (from.x + to.x) / 2, y: (from.y + to.y) / 2 };
     const dx = to.x - from.x;
     const dy = to.y - from.y;
     const len = Math.hypot(dx, dy) || 1;
-    const pos = { x: mid.x - (dy / len) * 14, y: mid.y + (dx / len) * 14 };
+    const nx = -dy / len;
+    const ny = dx / len;
+    const off = labelOffset(displayValue, this.extentPx(), nx, ny);
+    const pos = { x: mid.x + nx * off, y: mid.y + ny * off };
     this.group.appendChild(
       renderRemovableLabel({
         x: pos.x,
@@ -309,7 +321,8 @@ export class Circle {
     const hidden = override === "";
     const displayValue = override !== undefined && override !== "" ? override : `${round1(this.sweepDeg)}°`;
     const bis = (this.startAngleDeg + this.sweepDeg / 2) * DEG;
-    const lp = { x: this.center.x + (r + 20) * Math.cos(bis), y: this.center.y + (r + 20) * Math.sin(bis) };
+    const angOff = labelOffset(displayValue, this.extentPx(), Math.cos(bis), Math.sin(bis), 10);
+    const lp = { x: this.center.x + (r + angOff) * Math.cos(bis), y: this.center.y + (r + angOff) * Math.sin(bis) };
     this.group.appendChild(
       renderRemovableLabel({
         x: lp.x,
@@ -330,9 +343,10 @@ export class Circle {
     const arcUnits = round1(this.arcLengthUnits());
     const displayValue = override !== undefined && override !== "" ? override : arcUnits;
     const bis = (this.startAngleDeg + this.sweepDeg / 2) * DEG;
+    const arcOff = labelOffset(displayValue, this.extentPx(), Math.cos(bis), Math.sin(bis), 12);
     const lp = {
-      x: this.center.x + (this.radiusPx + 22) * Math.cos(bis),
-      y: this.center.y + (this.radiusPx + 22) * Math.sin(bis),
+      x: this.center.x + (this.radiusPx + arcOff) * Math.cos(bis),
+      y: this.center.y + (this.radiusPx + arcOff) * Math.sin(bis),
     };
     this.group.appendChild(
       renderRemovableLabel({

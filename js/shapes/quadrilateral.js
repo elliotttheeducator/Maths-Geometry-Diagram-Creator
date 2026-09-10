@@ -2,6 +2,7 @@ import { round1, nextId, PX_PER_UNIT, clamp, rotatePoint, midpoint } from "../ge
 import { el, text, clear, toSvgPoint, renderRemovableLabel, dimensionLine } from "../svgUtil.js";
 import { parseFieldInput } from "../fieldInput.js";
 import { paletteEntry } from "../palette.js";
+import { applyLabelScale, gap, extentOf, labelOffset, spreadLabels } from "../labelScale.js";
 
 const DEG = Math.PI / 180;
 
@@ -26,6 +27,7 @@ export class Quadrilateral {
     // Equal-opposite-side ticks: true information, but on a plain labelled rectangle
     // it's information the shape already carries, so it can be switched off.
     this.showTicks = true;
+    this.heightOutside = false; // draw the height outside the shape, off the extended base
     this.dimensionStyle = true; // arrows outside the shape rather than plain edge text
     this.overrides = {}; // base | side | height | angle -> "" hidden, or custom text
     this.selected = false;
@@ -145,6 +147,15 @@ export class Quadrilateral {
       });
       if (this.showHeight) {
         fields.push({
+          key: "height-outside",
+          group: "Measurements",
+          label: "Height outside",
+          kind: "toggle",
+          value: this.heightOutside,
+        });
+      }
+      if (this.showHeight) {
+        fields.push({
           key: "height",
           group: "Measurements",
           label: "Perp. height",
@@ -205,6 +216,11 @@ export class Quadrilateral {
       this.notifyChange();
       return;
     }
+    if (key === "height-outside") {
+      this.heightOutside = Boolean(value);
+      this.notifyChange();
+      return;
+    }
     if (key === "show-height") {
       this.showHeight = Boolean(value);
       this.notifyChange();
@@ -257,9 +273,14 @@ export class Quadrilateral {
     if (this.group) this.group.remove();
   }
 
+  extentPx() {
+    return extentOf(this.corners());
+  }
+
   render() {
     if (!this.group) return;
     clear(this.group);
+    applyLabelScale(this.group, this.extentPx());
     const pts = this.corners();
     const fill = paletteEntry(this.fillId).fill;
 
@@ -281,6 +302,8 @@ export class Quadrilateral {
 
     if (this.showLabels) this.renderCornerLabels(pts);
     this.renderHandles(pts);
+ 
+    spreadLabels(this.group, this.extentPx());
   }
 
   centroid() {
@@ -353,24 +376,40 @@ export class Quadrilateral {
     return { x: dx / len, y: dy / len };
   }
 
-  // Dashed perpendicular from the top-left corner down to the base line, with a
-  // right-angle box at its foot -- how textbooks show a parallelogram's height.
+  // Dashed perpendicular down to the base line with a right-angle box at its foot --
+  // how a textbook shows a parallelogram's height. Drawn inside from the top-left
+  // corner, or (heightOutside) from the top-right corner down to the base extended
+  // beyond it, which is the other drawing every textbook uses. Whenever the foot lands
+  // off the end of the base, the base is extended to meet it with a dashed line.
   renderPerpHeight(pts) {
-    const apex = pts[3];
+    const apex = this.heightOutside ? pts[2] : pts[3];
     const baseDir = this.unit(pts[0], pts[1]);
+    const baseLen = Math.hypot(pts[1].x - pts[0].x, pts[1].y - pts[0].y);
     const along = (apex.x - pts[0].x) * baseDir.x + (apex.y - pts[0].y) * baseDir.y;
     const foot = { x: pts[0].x + baseDir.x * along, y: pts[0].y + baseDir.y * along };
+
+    if (along < 0 || along > baseLen) {
+      const from = along < 0 ? pts[0] : pts[1];
+      this.group.appendChild(
+        el("line", { x1: from.x, y1: from.y, x2: foot.x, y2: foot.y, class: "construction-line base-extension" })
+      );
+    }
 
     this.group.appendChild(
       el("line", { x1: apex.x, y1: apex.y, x2: foot.x, y2: foot.y, class: "construction-line" })
     );
     const size = 11;
     const up = this.unit(foot, apex);
+    // The box opens back along the base towards the shape, so it reads as the corner
+    // between the height and the base rather than pointing off into space.
+    const towards = along > baseLen ? -1 : 1;
+    const bx = baseDir.x * towards;
+    const by = baseDir.y * towards;
     this.group.appendChild(
       el("path", {
-        d: `M ${foot.x + baseDir.x * size} ${foot.y + baseDir.y * size} L ${
-          foot.x + (baseDir.x + up.x) * size
-        } ${foot.y + (baseDir.y + up.y) * size} L ${foot.x + up.x * size} ${foot.y + up.y * size}`,
+        d: `M ${foot.x + bx * size} ${foot.y + by * size} L ${foot.x + (bx + up.x) * size} ${
+          foot.y + (by + up.y) * size
+        } L ${foot.x + up.x * size} ${foot.y + up.y * size}`,
         class: "right-angle-mark",
       })
     );
@@ -379,11 +418,21 @@ export class Quadrilateral {
     const hidden = override === "";
     const computed = round1(this.perpHeightUnits());
     const displayValue = override !== undefined && override !== "" ? override : computed;
+    // Beside the dashed line, on the side away from the shape's middle, so the number
+    // never sits over the fill or over an edge.
     const mid = midpoint(apex, foot);
+    const c = this.centroid();
+    // Beside its own dashed line: pushed further out when the height is drawn outside
+    // the shape, and towards the roomier half of the base when it's drawn inside.
+    const outside = along < 0 || along > baseLen;
+    const towardsLabel = outside ? (along < 0 ? -1 : 1) : along < baseLen / 2 ? 1 : -1;
+    const nx = baseDir.x * towardsLabel;
+    const ny = baseDir.y * towardsLabel;
+    const heightOff = labelOffset(displayValue, this.extentPx(), nx, ny);
     this.group.appendChild(
       renderRemovableLabel({
-        x: mid.x + 16,
-        y: mid.y,
+        x: mid.x + nx * heightOff,
+        y: mid.y + ny * heightOff,
         value: displayValue,
         hidden,
         cssClass: "side-label",
@@ -415,7 +464,8 @@ export class Quadrilateral {
     const bx = (u1.x + u2.x) / 2;
     const by = (u1.y + u2.y) / 2;
     const blen = Math.hypot(bx, by) || 1;
-    const lp = { x: V.x + (bx / blen) * (r + 18), y: V.y + (by / blen) * (r + 18) };
+    const angOff = labelOffset(displayValue, this.extentPx(), bx / blen, by / blen, 8);
+    const lp = { x: V.x + (bx / blen) * (r + angOff), y: V.y + (by / blen) * (r + angOff) };
     this.group.appendChild(
       renderRemovableLabel({
         x: lp.x,
@@ -448,14 +498,15 @@ export class Quadrilateral {
       ny = -ny;
     }
 
-    const gap = this.dimensionStyle ? 20 : 15;
+    const clearance = gap(this.extentPx(), this.dimensionStyle ? 20 : 15);
     if (this.dimensionStyle && !hidden) {
-      const off = { x: nx * gap, y: ny * gap };
+      const off = { x: nx * clearance, y: ny * clearance };
       this.group.appendChild(
         dimensionLine({ x: a.x + off.x, y: a.y + off.y }, { x: b.x + off.x, y: b.y + off.y }, 0)
       );
     }
-    const labelGap = this.dimensionStyle ? gap + 16 : gap;
+    const labelGap =
+      (this.dimensionStyle ? clearance : 0) + labelOffset(displayValue, this.extentPx(), nx, ny);
     this.group.appendChild(
       renderRemovableLabel({
         x: mid.x + nx * labelGap,

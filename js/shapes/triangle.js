@@ -14,6 +14,7 @@ import {
 import { el, text, clear, toSvgPoint, renderRemovableLabel } from "../svgUtil.js";
 import { parseFieldInput } from "../fieldInput.js";
 import { paletteEntry } from "../palette.js";
+import { applyLabelScale, gap, extentOf, labelOffset, spreadLabels } from "../labelScale.js";
 
 const DEG = Math.PI / 180;
 
@@ -62,6 +63,12 @@ export class Triangle {
     this.cevianLengthOverride = undefined;
     this.cevianPointLabels = ["D", "E"];
     this.fillId = "cream";
+    // Perpendicular height from one vertex to the opposite side. `from` is that vertex
+    // (null = not shown). On an obtuse triangle the foot lands beyond the end of the
+    // base, and the textbook drawing extends the base with a dashed line to meet it --
+    // that case is handled by the geometry rather than being a separate mode.
+    this.height = { from: null };
+    this.heightOverride = undefined;
     this.showTicks = true; // tick marks wherever two sides are genuinely equal
     this.showVertexLabels = true;
     // Set when an edit was refused as geometrically impossible, for the caller to report.
@@ -357,6 +364,54 @@ export class Triangle {
     this.notifyChange();
   }
 
+  // The altitude from `height.from`: where it meets the opposite side (or that side's
+  // extension), how long it is, and whether the foot falls outside the triangle.
+  heightGeometry() {
+    const apexIdx = this.height.from;
+    if (apexIdx == null) return null;
+    const apex = this.points[apexIdx];
+    const A = this.points[(apexIdx + 1) % 3];
+    const B = this.points[(apexIdx + 2) % 3];
+    const dx = B.x - A.x;
+    const dy = B.y - A.y;
+    const baseLen = Math.hypot(dx, dy) || 1;
+    const ux = dx / baseLen;
+    const uy = dy / baseLen;
+    const along = (apex.x - A.x) * ux + (apex.y - A.y) * uy;
+    const foot = { x: A.x + ux * along, y: A.y + uy * along };
+    return {
+      apex,
+      foot,
+      A,
+      B,
+      baseLen,
+      unit: { x: ux, y: uy },
+      along,
+      outside: along < 0 || along > baseLen,
+      // Which base endpoint the dashed extension has to reach out from.
+      from: along < 0 ? A : B,
+    };
+  }
+
+  heightUnits() {
+    const g = this.heightGeometry();
+    return g ? dist(g.apex, g.foot) / PX_PER_UNIT : 0;
+  }
+
+  // Setting the height slides the apex along its own perpendicular, so the base stays
+  // exactly where it is and only the height changes.
+  setHeight(units) {
+    const g = this.heightGeometry();
+    if (!g) return;
+    const target = Math.max(10, units * PX_PER_UNIT);
+    const current = dist(g.apex, g.foot) || 1;
+    const dirX = (g.apex.x - g.foot.x) / current;
+    const dirY = (g.apex.y - g.foot.y) / current;
+    this.points[this.height.from] = { x: g.foot.x + dirX * target, y: g.foot.y + dirY * target };
+    this.verifyLocks();
+    this.notifyChange();
+  }
+
   // Vertices and edge midpoints are the points other shapes snap to; the outline is
   // what "Turn into prism" extrudes.
   snapPoints() {
@@ -437,6 +492,39 @@ export class Triangle {
         });
       }
     }
+    fields.push({
+      key: "show-height",
+      group: "Perpendicular height",
+      label: "Show",
+      kind: "toggle",
+      value: this.height.from != null,
+    });
+    if (this.height.from != null) {
+      for (let i = 0; i < 3; i++) {
+        fields.push({
+          key: `height-from-${i}`,
+          group: "Perpendicular height",
+          label: `From ${this.labels[i]}`,
+          kind: "toggle",
+          value: this.height.from === i,
+        });
+      }
+      fields.push({
+        key: "height",
+        group: "Perpendicular height",
+        label: "Height",
+        kind: "length",
+        value: this.heightOverride !== undefined ? this.heightOverride : round1(this.heightUnits()),
+      });
+      fields.push({
+        key: "height-outside",
+        group: "Perpendicular height",
+        label: "Falls outside",
+        kind: "info",
+        value: this.heightGeometry()?.outside ? "yes -- base extended" : "no",
+      });
+    }
+
     fields.push({ key: "fill", group: "Appearance", label: "Fill", kind: "swatch", value: this.fillId });
     fields.push({
       key: "show-ticks",
@@ -530,6 +618,36 @@ export class Triangle {
     if (key === "show-ticks") {
       this.showTicks = Boolean(value);
       this.notifyChange();
+      return;
+    }
+    if (key === "show-height") {
+      // Default to the apex furthest from the longest side, which is the vertex a
+      // question means when it just says "the height".
+      this.height.from = value ? (this.height.from ?? 2) : null;
+      this.notifyChange();
+      return;
+    }
+    if (key.startsWith("height-from-")) {
+      if (value) this.height.from = Number(key.slice(12));
+      this.notifyChange();
+      return;
+    }
+    if (key === "height-outside") return; // derived
+    if (key === "height") {
+      if (this.height.from == null) this.height.from = 2;
+      const parsed = parseFieldInput(value);
+      if (parsed.hidden) {
+        this.heightOverride = "";
+        this.notifyChange();
+        return;
+      }
+      if (parsed.label !== undefined) {
+        this.heightOverride = parsed.label;
+        this.notifyChange();
+        return;
+      }
+      this.heightOverride = undefined;
+      this.setHeight(parsed.numeric);
       return;
     }
     if (key === "show-vertex-labels") {
@@ -688,9 +806,14 @@ export class Triangle {
     if (this.group) this.group.remove();
   }
 
+  extentPx() {
+    return extentOf(this.points);
+  }
+
   render() {
     if (!this.group) return;
     clear(this.group);
+    applyLabelScale(this.group, this.extentPx());
     const [A, B, C] = this.points;
     const centroid = this.centroid();
     const angles = this.angles();
@@ -714,6 +837,8 @@ export class Triangle {
     }
 
     if (this.showTicks) this.group.appendChild(this.renderEqualTicks());
+    const heightGroup = this.renderHeight();
+    if (heightGroup) this.group.appendChild(heightGroup);
 
     // side length labels
     for (let i = 0; i < 3; i++) {
@@ -731,6 +856,8 @@ export class Triangle {
     }
 
     this.group.appendChild(this.renderRotateHandle(centroid));
+ 
+    spreadLabels(this.group, this.extentPx());
   }
 
   renderAngleMark(i, angleDeg) {
@@ -745,7 +872,7 @@ export class Triangle {
     const r = 22;
     let diff = ((dirR - dirF + Math.PI * 3) % (Math.PI * 2)) - Math.PI;
     const bisector = dirF + diff / 2;
-    const labelR = r + 16;
+    const labelR = r + labelOffset(`${round1(angleDeg)}°`, this.extentPx(), Math.cos(bisector), Math.sin(bisector), 6);
     const lp = { x: V.x + labelR * Math.cos(bisector), y: V.y + labelR * Math.sin(bisector) };
 
     const group = el("g");
@@ -790,6 +917,72 @@ export class Triangle {
         cssClass: "angle-label",
         onRemove: () => this.setField(`angle-${i}`, ""),
         onDoubleClick: (e) => this.startInlineEdit(e, `angle-${i}`, displayValue),
+      })
+    );
+    return group;
+  }
+
+  // The textbook perpendicular height: a dashed altitude with a right-angle box where
+  // it meets the base, and -- when the foot lands past the end of the base, as it does
+  // on any obtuse triangle -- a dashed extension of the base out to meet it.
+  renderHeight() {
+    const g = this.heightGeometry();
+    if (!g) return null;
+    const group = el("g");
+
+    if (g.outside) {
+      group.appendChild(
+        el("line", {
+          x1: g.from.x,
+          y1: g.from.y,
+          x2: g.foot.x,
+          y2: g.foot.y,
+          class: "construction-line base-extension",
+        })
+      );
+    }
+
+    group.appendChild(
+      el("line", { x1: g.apex.x, y1: g.apex.y, x2: g.foot.x, y2: g.foot.y, class: "construction-line" })
+    );
+
+    // The box sits in the corner between the altitude and the base, on the side the
+    // base actually runs -- for an external height that's back towards the triangle.
+    const size = 12;
+    const up = { x: (g.apex.x - g.foot.x) / (dist(g.apex, g.foot) || 1), y: (g.apex.y - g.foot.y) / (dist(g.apex, g.foot) || 1) };
+    const towards = g.along < 0 ? 1 : -1; // point the box back along the base
+    const bx = g.unit.x * towards;
+    const by = g.unit.y * towards;
+    group.appendChild(
+      el("path", {
+        d: `M ${g.foot.x + bx * size} ${g.foot.y + by * size} L ${g.foot.x + (bx + up.x) * size} ${
+          g.foot.y + (by + up.y) * size
+        } L ${g.foot.x + up.x * size} ${g.foot.y + up.y * size}`,
+        class: "right-angle-mark",
+      })
+    );
+
+    const hidden = this.heightOverride === "";
+    const computed = round1(this.heightUnits());
+    const displayValue = this.heightOverride !== undefined && this.heightOverride !== "" ? this.heightOverride : computed;
+    // The altitude splits the base into two pieces; the label goes on the side of the
+    // longer one, which is the open part of the triangle. Putting it on the short side
+    // is what makes a height label collide with the edge next to it.
+    const mid = midpoint(g.apex, g.foot);
+    const towardsB = g.outside ? (g.along < 0 ? -1 : 1) : g.along < g.baseLen / 2 ? 1 : -1;
+    const nx = g.unit.x * towardsB;
+    const ny = g.unit.y * towardsB;
+    const off = labelOffset(displayValue, this.extentPx(), nx, ny);
+    group.appendChild(
+      renderRemovableLabel({
+        x: mid.x + nx * off,
+        y: mid.y + ny * off,
+        value: displayValue,
+        hidden,
+        cssClass: "side-label",
+        onRemove: () => this.setField("height", ""),
+        onRestore: (e) => this.startInlineEdit(e, "height", computed),
+        onDoubleClick: (e) => this.startInlineEdit(e, "height", displayValue),
       })
     );
     return group;
@@ -914,10 +1107,10 @@ export class Triangle {
       nx = -nx;
       ny = -ny;
     }
-    const offset = 16;
     const hidden = this.sideOverrides[i] === "";
     const lengthUnits = round1(dist(from, to) / PX_PER_UNIT);
     const displayValue = this.sideOverrides[i] !== undefined ? this.sideOverrides[i] : lengthUnits;
+    const offset = labelOffset(displayValue, this.extentPx(), nx, ny);
     const pos = { x: mid.x + nx * offset, y: mid.y + ny * offset };
 
     return renderRemovableLabel({

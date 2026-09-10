@@ -14,8 +14,9 @@ text { font-family: Georgia, "Times New Roman", "Nimbus Roman", serif; }
 .hidden-edge { stroke: #1a1a1a; stroke-width: 1.2; stroke-dasharray: 6 5; fill: none; opacity: 0.75; }
 .dimension-shaft { stroke: #1a1a1a; stroke-width: 1.3; }
 .dimension-head { fill: #1a1a1a; stroke: none; }
-.vertex-label { font-size: 16px; font-style: italic; fill: #1a1a1a; }
-.side-label, .angle-label { font-size: 15px; fill: #1a1a1a; }
+.vertex-label, .side-label, .angle-label { paint-order: stroke; stroke: #ffffff; stroke-width: calc(4px * var(--label-scale, 1)); stroke-linejoin: round; }
+.vertex-label { font-size: calc(16px * var(--label-scale, 1)); font-style: italic; fill: #1a1a1a; }
+.side-label, .angle-label { font-size: calc(15px * var(--label-scale, 1)); fill: #1a1a1a; }
 .angle-arc { fill: none; stroke: #1a1a1a; stroke-width: 1.3; }
 .right-angle-mark { fill: none; stroke: #1a1a1a; stroke-width: 1.3; }
 .parallel-chevron { stroke: #1a1a1a; stroke-width: 1.5; fill: none; }

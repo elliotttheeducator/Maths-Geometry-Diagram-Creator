@@ -2,6 +2,7 @@ import { round1, nextId, PX_PER_UNIT, clamp, midpoint } from "../geometry.js";
 import { el, text, clear, toSvgPoint, renderRemovableLabel } from "../svgUtil.js";
 import { parseFieldInput } from "../fieldInput.js";
 import { paletteEntry } from "../palette.js";
+import { applyLabelScale, gap, extentOf, labelOffset, spreadLabels } from "../labelScale.js";
 
 const DEG = Math.PI / 180;
 const VERTEX_NAMES = "ABCDEFGHIJKL";
@@ -189,9 +190,14 @@ export class RegularPolygon {
     if (this.group) this.group.remove();
   }
 
+  extentPx() {
+    return this.radiusPx * 2;
+  }
+
   render() {
     if (!this.group) return;
     clear(this.group);
+    applyLabelScale(this.group, this.extentPx());
     const pts = this.vertices();
 
     const poly = el("polygon", {
@@ -207,6 +213,8 @@ export class RegularPolygon {
     this.renderSideLabel(pts);
     if (this.showLabels) this.renderVertexLabels(pts);
     this.renderHandles(pts);
+ 
+    spreadLabels(this.group, this.extentPx());
   }
 
   // One tick on every side -- the notation that says "all of these are equal".
@@ -252,10 +260,11 @@ export class RegularPolygon {
     const bx = (u1.x + u2.x) / 2;
     const by = (u1.y + u2.y) / 2;
     const blen = Math.hypot(bx, by) || 1;
+    const angOff = labelOffset(displayValue, this.extentPx(), bx / blen, by / blen, 8);
     this.group.appendChild(
       renderRemovableLabel({
-        x: V.x + (bx / blen) * (r + 20),
-        y: V.y + (by / blen) * (r + 20),
+        x: V.x + (bx / blen) * (r + angOff),
+        y: V.y + (by / blen) * (r + angOff),
         value: displayValue,
         hidden,
         cssClass: "angle-label",
@@ -279,10 +288,11 @@ export class RegularPolygon {
     const hidden = override === "";
     const computed = round1(this.sideUnits());
     const displayValue = override !== undefined && override !== "" ? override : computed;
+    const off = labelOffset(displayValue, this.extentPx(), dx / len, dy / len);
     this.group.appendChild(
       renderRemovableLabel({
-        x: mid.x + (dx / len) * 20,
-        y: mid.y + (dy / len) * 20,
+        x: mid.x + (dx / len) * off,
+        y: mid.y + (dy / len) * off,
         value: displayValue,
         hidden,
         cssClass: "side-label",

@@ -18,6 +18,7 @@ const outPath = process.argv[2] || join(ROOT, "dist", "artifact.html");
 const JS_FILES = [
   "js/geometry.js",
   "js/units.js",
+  "js/labelScale.js",
   "js/palette.js",
   "js/svgUtil.js",
   "js/fieldInput.js",
