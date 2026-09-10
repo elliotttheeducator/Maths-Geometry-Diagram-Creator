@@ -384,45 +384,45 @@ button.danger-btn:hover:not(:disabled) {
    they're set as attributes rather than here. */
 .shape-poly {
   stroke: var(--shape-stroke);
-  stroke-width: 1.6;
+  stroke-width: calc(1.6px * var(--label-scale, 1));
   stroke-linejoin: round;
 }
 
 .shape-poly.selected {
   stroke: var(--selected);
-  stroke-width: 2.2;
+  stroke-width: calc(2.2px * var(--label-scale, 1));
 }
 
 .shape-line {
   stroke: var(--shape-stroke);
-  stroke-width: 1.6;
+  stroke-width: calc(1.6px * var(--label-scale, 1));
   fill: none;
   stroke-linecap: round;
 }
 
 .shape-line.selected {
   stroke: var(--selected);
-  stroke-width: 2.2;
+  stroke-width: calc(2.2px * var(--label-scale, 1));
 }
 
 .construction-line {
   stroke: var(--shape-stroke);
-  stroke-width: 1.3;
-  stroke-dasharray: 5 4;
+  stroke-width: calc(1.3px * var(--label-scale, 1));
+  stroke-dasharray: calc(5px * var(--label-scale, 1)) calc(4px * var(--label-scale, 1));
   fill: none;
 }
 
 .hidden-edge {
   stroke: var(--shape-stroke);
-  stroke-width: 1.2;
-  stroke-dasharray: 6 5;
+  stroke-width: calc(1.2px * var(--label-scale, 1));
+  stroke-dasharray: calc(6px * var(--label-scale, 1)) calc(5px * var(--label-scale, 1));
   fill: none;
   opacity: 0.75;
 }
 
 .dimension-shaft {
   stroke: var(--shape-stroke);
-  stroke-width: 1.3;
+  stroke-width: calc(1.3px * var(--label-scale, 1));
 }
 
 .dimension-head {
@@ -433,7 +433,7 @@ button.danger-btn:hover:not(:disabled) {
 .vertex-handle {
   fill: #ffffff;
   stroke: var(--shape-stroke);
-  stroke-width: 1.5;
+  stroke-width: calc(1.5px * var(--label-scale, 1));
   cursor: grab;
 }
 .vertex-handle:hover {
@@ -446,7 +446,7 @@ button.danger-btn:hover:not(:disabled) {
 .drag-handle {
   fill: var(--accent);
   stroke: white;
-  stroke-width: 1.5;
+  stroke-width: calc(1.5px * var(--label-scale, 1));
   cursor: grab;
   opacity: 0.85;
 }
@@ -851,7 +851,7 @@ return { UNIT_CHOICES, setLengthUnit, lengthUnit, withUnit };
 })();
 
 // --- js/labelScale.js ---
-const { labelScale, applyLabelScale, gap, labelOffset, spreadLabels, extentOf } = (function () {
+const { labelScale, scaled, applyLabelScale, gap, labelOffset, spreadLabels, extentOf } = (function () {
 // Label text is drawn in the same user-space as the geometry, so a diagram of a 16 cm
 // wall and a diagram of a 3 cm tile come out with wildly different text-to-shape
 // ratios: the same 15px label reads as a caption on one and as a shout on the other.
@@ -859,13 +859,24 @@ const { labelScale, applyLabelScale, gap, labelOffset, spreadLabels, extentOf } 
 // the label size has to be chosen from how big the figure actually is.
 //
 // TARGET_EXTENT is the figure size at which the base sizes look right; everything else
-// is scaled towards it, within limits that keep tiny figures readable and huge ones
-// from turning into billboards.
+// is scaled in proportion to it.
+//
+// The scaling is deliberately unbounded above. A side of 100 draws a figure 5000px
+// across, and any ceiling on the scale means the labels, strokes and marks stop growing
+// with it and shrink away to nothing -- the ink has to stay a constant *fraction* of
+// the figure for the diagram to look the same at every size. The floor only stops a
+// very small figure from being drawn in hairlines.
 const TARGET_EXTENT = 320;
 
 function labelScale(extentPx) {
   if (!extentPx || !Number.isFinite(extentPx)) return 1;
-  return clamp(extentPx / TARGET_EXTENT, 0.9, 2.6);
+  return Math.max(extentPx / TARGET_EXTENT, 0.6);
+}
+
+// Any fixed-size piece of notation -- an arc radius, a right-angle box, a tick -- has
+// to scale the same way the text does, or it stops reading at large sizes too.
+function scaled(extentPx, base) {
+  return base * labelScale(extentPx);
 }
 
 // Sets the scale the label CSS reads. Every label size, halo width and tick length is
@@ -974,7 +985,7 @@ function extentOf(points) {
   }
   return Math.max(maxX - minX, maxY - minY);
 }
-return { labelScale, applyLabelScale, gap, labelOffset, spreadLabels, extentOf };
+return { labelScale, scaled, applyLabelScale, gap, labelOffset, spreadLabels, extentOf };
 })();
 
 // --- js/palette.js ---
@@ -1086,7 +1097,7 @@ function renderRemovableLabel({ x, y, value, hidden, cssClass, onRemove, onResto
 // A textbook dimension line: double-headed arrow between two points, with a short
 // perpendicular tick at each end -- the convention for marking an overall length
 // outside the shape rather than labelling the edge itself.
-function dimensionLine(from, to, offset = 0) {
+function dimensionLine(from, to, offset = 0, scale = 1) {
   const dx = to.x - from.x;
   const dy = to.y - from.y;
   const len = Math.hypot(dx, dy) || 1;
@@ -1100,8 +1111,10 @@ function dimensionLine(from, to, offset = 0) {
   const g = el("g", { class: "dimension-line" });
   g.appendChild(el("line", { x1: a.x, y1: a.y, x2: b.x, y2: b.y, class: "dimension-shaft" }));
 
-  const head = 7;
-  const wing = 3.2;
+  // Arrowheads and end ticks are notation, so they scale with the figure like
+  // everything else -- fixed ones vanish on a large diagram.
+  const head = 7 * scale;
+  const wing = 3.2 * scale;
   for (const [tip, dir] of [
     [a, 1],
     [b, -1],
@@ -1114,7 +1127,7 @@ function dimensionLine(from, to, offset = 0) {
         class: "dimension-head",
       })
     );
-    const tick = 5;
+    const tick = 5 * scale;
     g.appendChild(
       el("line", {
         x1: tip.x + nx * tick,
@@ -1345,19 +1358,19 @@ const EXPORT_SCALE = 2; // render at 2x for crisp pasting into a Word doc / slid
 // This mirrors the relevant rules from style.css so exported files render identically.
 const EXPORT_STYLE = `
 text { font-family: Georgia, "Times New Roman", "Nimbus Roman", serif; }
-.shape-poly { stroke: #1a1a1a; stroke-width: 1.6; stroke-linejoin: round; }
-.shape-line { stroke: #1a1a1a; stroke-width: 1.6; fill: none; stroke-linecap: round; }
-.construction-line { stroke: #1a1a1a; stroke-width: 1.3; stroke-dasharray: 5 4; fill: none; }
-.hidden-edge { stroke: #1a1a1a; stroke-width: 1.2; stroke-dasharray: 6 5; fill: none; opacity: 0.75; }
-.dimension-shaft { stroke: #1a1a1a; stroke-width: 1.3; }
+.shape-poly { stroke: #1a1a1a; stroke-width: calc(1.6px * var(--label-scale, 1)); stroke-linejoin: round; }
+.shape-line { stroke: #1a1a1a; stroke-width: calc(1.6px * var(--label-scale, 1)); fill: none; stroke-linecap: round; }
+.construction-line { stroke: #1a1a1a; stroke-width: calc(1.3px * var(--label-scale, 1)); stroke-dasharray: calc(5px * var(--label-scale, 1)) calc(4px * var(--label-scale, 1)); fill: none; }
+.hidden-edge { stroke: #1a1a1a; stroke-width: calc(1.2px * var(--label-scale, 1)); stroke-dasharray: calc(6px * var(--label-scale, 1)) calc(5px * var(--label-scale, 1)); fill: none; opacity: 0.75; }
+.dimension-shaft { stroke: #1a1a1a; stroke-width: calc(1.3px * var(--label-scale, 1)); }
 .dimension-head { fill: #1a1a1a; stroke: none; }
 .vertex-label, .side-label, .angle-label { paint-order: stroke; stroke: #ffffff; stroke-width: calc(4px * var(--label-scale, 1)); stroke-linejoin: round; }
 .vertex-label { font-size: calc(16px * var(--label-scale, 1)); font-style: italic; fill: #1a1a1a; }
 .side-label, .angle-label { font-size: calc(15px * var(--label-scale, 1)); fill: #1a1a1a; }
-.angle-arc { fill: none; stroke: #1a1a1a; stroke-width: 1.3; }
-.right-angle-mark { fill: none; stroke: #1a1a1a; stroke-width: 1.3; }
-.parallel-chevron { stroke: #1a1a1a; stroke-width: 1.5; fill: none; }
-.equal-length-tick { stroke: #1a1a1a; stroke-width: 1.5; }
+.angle-arc { fill: none; stroke: #1a1a1a; stroke-width: calc(1.3px * var(--label-scale, 1)); }
+.right-angle-mark { fill: none; stroke: #1a1a1a; stroke-width: calc(1.3px * var(--label-scale, 1)); }
+.parallel-chevron { stroke: #1a1a1a; stroke-width: calc(1.5px * var(--label-scale, 1)); fill: none; }
+.equal-length-tick { stroke: #1a1a1a; stroke-width: calc(1.5px * var(--label-scale, 1)); }
 `;
 
 const CROP_PADDING = 24;
@@ -2546,8 +2559,15 @@ class Triangle {
     if (this.group) this.group.remove();
   }
 
-  extentPx() {
+  ownExtentPx() {
     return extentOf(this.points);
+  }
+
+  // Notation scales with the diagram, not with each shape on its own: two shapes
+  // butted into one composite have to be labelled at the same size to read as one
+  // drawing. Falls back to this shape's own size when it stands alone.
+  extentPx() {
+    return this.controller?.diagramExtent?.() || this.ownExtentPx();
   }
 
   render() {
@@ -2609,7 +2629,7 @@ class Triangle {
 
     const dirF = Math.atan2(F.y - V.y, F.x - V.x);
     const dirR = Math.atan2(R.y - V.y, R.x - V.x);
-    const r = 22;
+    const r = scaled(this.extentPx(), 22);
     let diff = ((dirR - dirF + Math.PI * 3) % (Math.PI * 2)) - Math.PI;
     const bisector = dirF + diff / 2;
     const labelR = r + labelOffset(`${round1(angleDeg)}°`, this.extentPx(), Math.cos(bisector), Math.sin(bisector), 6);
@@ -2688,7 +2708,7 @@ class Triangle {
 
     // The box sits in the corner between the altitude and the base, on the side the
     // base actually runs -- for an external height that's back towards the triangle.
-    const size = 12;
+    const size = scaled(this.extentPx(), 12);
     const up = { x: (g.apex.x - g.foot.x) / (dist(g.apex, g.foot) || 1), y: (g.apex.y - g.foot.y) / (dist(g.apex, g.foot) || 1) };
     const towards = g.along < 0 ? 1 : -1; // point the box back along the base
     const bx = g.unit.x * towards;
@@ -2729,7 +2749,7 @@ class Triangle {
   }
 
   rightAngleMark(V, dirF, dirR) {
-    const size = 14;
+    const size = scaled(this.extentPx(), 14);
     const uF = { x: Math.cos(dirF), y: Math.sin(dirF) };
     const uR = { x: Math.cos(dirR), y: Math.sin(dirR) };
     const p1 = { x: V.x + uF.x * size, y: V.y + uF.y * size };
@@ -2755,6 +2775,7 @@ class Triangle {
       else groups.push({ len, indices: [i] });
     });
 
+    const tick = scaled(this.extentPx(), 5);
     let markIndex = 0;
     for (const grp of groups) {
       if (grp.indices.length < 2) continue;
@@ -2767,14 +2788,14 @@ class Triangle {
         const ux = (b.x - a.x) / len;
         const uy = (b.y - a.y) / len;
         for (let t = 0; t < markIndex; t++) {
-          const off = (t - (markIndex - 1) / 2) * 5;
+          const off = (t - (markIndex - 1) / 2) * tick;
           const c = { x: mid.x + ux * off, y: mid.y + uy * off };
           g.appendChild(
             el("line", {
-              x1: c.x - uy * 5,
-              y1: c.y + ux * 5,
-              x2: c.x + uy * 5,
-              y2: c.y - ux * 5,
+              x1: c.x - uy * tick,
+              y1: c.y + ux * tick,
+              x2: c.x + uy * tick,
+              y2: c.y - ux * tick,
               class: "equal-length-tick",
             })
           );
@@ -2965,7 +2986,7 @@ class Triangle {
     const dx = p.x - centroid.x;
     const dy = p.y - centroid.y;
     const len = Math.hypot(dx, dy) || 1;
-    const offset = 20;
+    const offset = scaled(this.extentPx(), 20);
     const t = text(this.labels[i], {
       x: p.x + (dx / len) * offset,
       y: p.y + (dy / len) * offset,
@@ -4145,8 +4166,15 @@ class LineGraph {
     if (this.group) this.group.remove();
   }
 
-  extentPx() {
+  ownExtentPx() {
     return extentOf(this.vertices);
+  }
+
+  // Notation scales with the diagram, not with each shape on its own: two shapes
+  // butted into one composite have to be labelled at the same size to read as one
+  // drawing. Falls back to this shape's own size when it stands alone.
+  extentPx() {
+    return this.controller?.diagramExtent?.() || this.ownExtentPx();
   }
 
   render() {
@@ -4823,8 +4851,15 @@ class Circle {
     if (this.group) this.group.remove();
   }
 
-  extentPx() {
+  ownExtentPx() {
     return this.radiusPx * 2;
+  }
+
+  // Notation scales with the diagram, not with each shape on its own: two shapes
+  // butted into one composite have to be labelled at the same size to read as one
+  // drawing. Falls back to this shape's own size when it stands alone.
+  extentPx() {
+    return this.controller?.diagramExtent?.() || this.ownExtentPx();
   }
 
   render() {
@@ -4860,7 +4895,13 @@ class Circle {
 
     // centre dot, and handles: one to size the radius, one to sweep the angle
     this.group.appendChild(
-      el("circle", { cx: this.center.x, cy: this.center.y, r: 2.5, fill: "#1a1a1a", class: "centre-dot" })
+      el("circle", {
+        cx: this.center.x,
+        cy: this.center.y,
+        r: scaled(this.extentPx(), 2.5),
+        fill: "#1a1a1a",
+        class: "centre-dot",
+      })
     );
     const radiusHandlePt = this.pointAt(this.mode === "circle" ? -90 : this.startAngleDeg);
     const rh = el("circle", { cx: radiusHandlePt.x, cy: radiusHandlePt.y, r: 6, class: "vertex-handle" });
@@ -5329,8 +5370,15 @@ class Quadrilateral {
     if (this.group) this.group.remove();
   }
 
-  extentPx() {
+  ownExtentPx() {
     return extentOf(this.corners());
+  }
+
+  // Notation scales with the diagram, not with each shape on its own: two shapes
+  // butted into one composite have to be labelled at the same size to read as one
+  // drawing. Falls back to this shape's own size when it stands alone.
+  extentPx() {
+    return this.controller?.diagramExtent?.() || this.ownExtentPx();
   }
 
   render() {
@@ -5380,6 +5428,7 @@ class Quadrilateral {
       [pts[1], pts[2], 2],
       [pts[3], pts[0], 2],
     ];
+    const tick = scaled(this.extentPx(), 5);
     for (const [a, b, count] of pairs) {
       const mid = midpoint(a, b);
       const dx = b.x - a.x;
@@ -5390,14 +5439,14 @@ class Quadrilateral {
       const nx = -uy;
       const ny = ux;
       for (let i = 0; i < count; i++) {
-        const off = (i - (count - 1) / 2) * 5;
+        const off = (i - (count - 1) / 2) * tick;
         const c = { x: mid.x + ux * off, y: mid.y + uy * off };
         g.appendChild(
           el("line", {
-            x1: c.x + nx * 5,
-            y1: c.y + ny * 5,
-            x2: c.x - nx * 5,
-            y2: c.y - ny * 5,
+            x1: c.x + nx * tick,
+            y1: c.y + ny * tick,
+            x2: c.x - nx * tick,
+            y2: c.y - ny * tick,
             class: "equal-length-tick",
           })
         );
@@ -5407,7 +5456,7 @@ class Quadrilateral {
   }
 
   renderRightAngles(pts) {
-    const size = 12;
+    const size = scaled(this.extentPx(), 12);
     for (let i = 0; i < 4; i++) {
       const V = pts[i];
       const prev = pts[(i + 3) % 4];
@@ -5454,7 +5503,7 @@ class Quadrilateral {
     this.group.appendChild(
       el("line", { x1: apex.x, y1: apex.y, x2: foot.x, y2: foot.y, class: "construction-line" })
     );
-    const size = 11;
+    const size = scaled(this.extentPx(), 11);
     const up = this.unit(foot, apex);
     // The box opens back along the base towards the shape, so it reads as the corner
     // between the height and the base rather than pointing off into space.
@@ -5503,7 +5552,7 @@ class Quadrilateral {
     const V = pts[0];
     const u1 = this.unit(V, pts[1]);
     const u2 = this.unit(V, pts[3]);
-    const r = 26;
+    const r = scaled(this.extentPx(), 26);
     const p1 = { x: V.x + u1.x * r, y: V.y + u1.y * r };
     const p2 = { x: V.x + u2.x * r, y: V.y + u2.y * r };
     const cross = u1.x * u2.y - u1.y * u2.x;
@@ -5558,7 +5607,12 @@ class Quadrilateral {
     if (this.dimensionStyle && !hidden) {
       const off = { x: nx * clearance, y: ny * clearance };
       this.group.appendChild(
-        dimensionLine({ x: a.x + off.x, y: a.y + off.y }, { x: b.x + off.x, y: b.y + off.y }, 0)
+        dimensionLine(
+          { x: a.x + off.x, y: a.y + off.y },
+          { x: b.x + off.x, y: b.y + off.y },
+          0,
+          scaled(this.extentPx(), 1)
+        )
       );
     }
     const labelGap =
@@ -5583,10 +5637,11 @@ class Quadrilateral {
       const dx = p.x - c.x;
       const dy = p.y - c.y;
       const len = Math.hypot(dx, dy) || 1;
+      const off = scaled(this.extentPx(), 18);
       this.group.appendChild(
         text(this.labels[i], {
-          x: p.x + (dx / len) * 18,
-          y: p.y + (dy / len) * 18,
+          x: p.x + (dx / len) * off,
+          y: p.y + (dy / len) * off,
           class: "vertex-label",
           "text-anchor": "middle",
           "dominant-baseline": "middle",
@@ -5991,8 +6046,15 @@ class Prism {
     if (this.group) this.group.remove();
   }
 
-  extentPx() {
+  ownExtentPx() {
     return extentOf([...this.frontFace(), ...this.backFace()]);
+  }
+
+  // Notation scales with the diagram, not with each shape on its own: two shapes
+  // butted into one composite have to be labelled at the same size to read as one
+  // drawing. Falls back to this shape's own size when it stands alone.
+  extentPx() {
+    return this.controller?.diagramExtent?.() || this.ownExtentPx();
   }
 
   render() {
@@ -6066,7 +6128,7 @@ class Prism {
     this.group.appendChild(
       el("line", { x1: apex.x, y1: apex.y, x2: foot.x, y2: foot.y, class: "construction-line" })
     );
-    const s = 11;
+    const s = scaled(this.extentPx(), 11);
     this.group.appendChild(
       el("path", {
         d: `M ${foot.x + s} ${foot.y} L ${foot.x + s} ${foot.y - s} L ${foot.x} ${foot.y - s}`,
@@ -6424,8 +6486,15 @@ class RegularPolygon {
     if (this.group) this.group.remove();
   }
 
-  extentPx() {
+  ownExtentPx() {
     return this.radiusPx * 2;
+  }
+
+  // Notation scales with the diagram, not with each shape on its own: two shapes
+  // butted into one composite have to be labelled at the same size to read as one
+  // drawing. Falls back to this shape's own size when it stands alone.
+  extentPx() {
+    return this.controller?.diagramExtent?.() || this.ownExtentPx();
   }
 
   render() {
@@ -6453,6 +6522,7 @@ class RegularPolygon {
 
   // One tick on every side -- the notation that says "all of these are equal".
   renderTicks(pts) {
+    const tick = scaled(this.extentPx(), 5);
     for (let i = 0; i < pts.length; i++) {
       const a = pts[i];
       const b = pts[(i + 1) % pts.length];
@@ -6462,10 +6532,10 @@ class RegularPolygon {
       const ny = (b.x - a.x) / len;
       this.group.appendChild(
         el("line", {
-          x1: mid.x + nx * 5,
-          y1: mid.y + ny * 5,
-          x2: mid.x - nx * 5,
-          y2: mid.y - ny * 5,
+          x1: mid.x + nx * tick,
+          y1: mid.y + ny * tick,
+          x2: mid.x - nx * tick,
+          y2: mid.y - ny * tick,
           class: "equal-length-tick",
         })
       );
@@ -6476,7 +6546,7 @@ class RegularPolygon {
     const V = pts[0];
     const u1 = unitTo(V, pts[pts.length - 1]);
     const u2 = unitTo(V, pts[1]);
-    const r = 24;
+    const r = scaled(this.extentPx(), 24);
     const p1 = { x: V.x + u1.x * r, y: V.y + u1.y * r };
     const p2 = { x: V.x + u2.x * r, y: V.y + u2.y * r };
     const cross = u1.x * u2.y - u1.y * u2.x;
@@ -6542,10 +6612,11 @@ class RegularPolygon {
       const dx = p.x - this.center.x;
       const dy = p.y - this.center.y;
       const len = Math.hypot(dx, dy) || 1;
+      const off = scaled(this.extentPx(), 18);
       this.group.appendChild(
         text(VERTEX_NAMES[i] || `P${i + 1}`, {
-          x: p.x + (dx / len) * 18,
-          y: p.y + (dy / len) * 18,
+          x: p.x + (dx / len) * off,
+          y: p.y + (dy / len) * off,
           class: "vertex-label",
           "text-anchor": "middle",
           "dominant-baseline": "middle",
@@ -7632,15 +7703,25 @@ const NS = "http://www.w3.org/2000/svg";
 const SHEET_PADDING = 24;
 
 // Nothing in a spec-rendered diagram is interactive, so the shapes get a controller
-// that satisfies the interface and does nothing.
-const STATIC_CONTROLLER = {
-  onSelect() {},
-  onChange() {},
-  onInlineEdit() {},
-  snapNudge() {
-    return null;
-  },
-};
+// that satisfies the interface and does nothing -- except report the diagram's overall
+// size, which is what keeps every shape's notation scaled to the same drawing.
+function staticController(shapes) {
+  return {
+    onSelect() {},
+    onChange() {},
+    onInlineEdit() {},
+    snapNudge() {
+      return null;
+    },
+    diagramExtent() {
+      let biggest = 0;
+      for (const shape of shapes) {
+        if (typeof shape.ownExtentPx === "function") biggest = Math.max(biggest, shape.ownExtentPx());
+      }
+      return biggest;
+    },
+  };
+}
 
 let offscreenHost = null;
 
@@ -7665,7 +7746,8 @@ function renderDiagramToSvg(items) {
   host().appendChild(svgEl);
 
   const { shapes, warnings } = buildDiagram(items);
-  for (const shape of shapes) shape.mount(layer, STATIC_CONTROLLER);
+  const controller = staticController(shapes);
+  for (const shape of shapes) shape.mount(layer, controller);
 
   let box = null;
   try {
@@ -8008,6 +8090,15 @@ const controller = {
   },
   snapNudge(shape) {
     return snapNudge(shape);
+  },
+  // The size every shape scales its notation to. Deliberately reads ownExtentPx --
+  // extentPx asks the controller, so using it here would recurse.
+  diagramExtent() {
+    let biggest = 0;
+    for (const shape of shapes) {
+      if (typeof shape.ownExtentPx === "function") biggest = Math.max(biggest, shape.ownExtentPx());
+    }
+    return biggest;
   },
 };
 

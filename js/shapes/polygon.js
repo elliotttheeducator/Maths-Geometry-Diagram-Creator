@@ -2,7 +2,7 @@ import { round1, nextId, PX_PER_UNIT, clamp, midpoint } from "../geometry.js";
 import { el, text, clear, toSvgPoint, renderRemovableLabel } from "../svgUtil.js";
 import { parseFieldInput } from "../fieldInput.js";
 import { paletteEntry } from "../palette.js";
-import { applyLabelScale, gap, extentOf, labelOffset, spreadLabels } from "../labelScale.js";
+import { applyLabelScale, gap, extentOf, labelOffset, spreadLabels, scaled } from "../labelScale.js";
 
 const DEG = Math.PI / 180;
 const VERTEX_NAMES = "ABCDEFGHIJKL";
@@ -190,8 +190,15 @@ export class RegularPolygon {
     if (this.group) this.group.remove();
   }
 
-  extentPx() {
+  ownExtentPx() {
     return this.radiusPx * 2;
+  }
+
+  // Notation scales with the diagram, not with each shape on its own: two shapes
+  // butted into one composite have to be labelled at the same size to read as one
+  // drawing. Falls back to this shape's own size when it stands alone.
+  extentPx() {
+    return this.controller?.diagramExtent?.() || this.ownExtentPx();
   }
 
   render() {
@@ -219,6 +226,7 @@ export class RegularPolygon {
 
   // One tick on every side -- the notation that says "all of these are equal".
   renderTicks(pts) {
+    const tick = scaled(this.extentPx(), 5);
     for (let i = 0; i < pts.length; i++) {
       const a = pts[i];
       const b = pts[(i + 1) % pts.length];
@@ -228,10 +236,10 @@ export class RegularPolygon {
       const ny = (b.x - a.x) / len;
       this.group.appendChild(
         el("line", {
-          x1: mid.x + nx * 5,
-          y1: mid.y + ny * 5,
-          x2: mid.x - nx * 5,
-          y2: mid.y - ny * 5,
+          x1: mid.x + nx * tick,
+          y1: mid.y + ny * tick,
+          x2: mid.x - nx * tick,
+          y2: mid.y - ny * tick,
           class: "equal-length-tick",
         })
       );
@@ -242,7 +250,7 @@ export class RegularPolygon {
     const V = pts[0];
     const u1 = unitTo(V, pts[pts.length - 1]);
     const u2 = unitTo(V, pts[1]);
-    const r = 24;
+    const r = scaled(this.extentPx(), 24);
     const p1 = { x: V.x + u1.x * r, y: V.y + u1.y * r };
     const p2 = { x: V.x + u2.x * r, y: V.y + u2.y * r };
     const cross = u1.x * u2.y - u1.y * u2.x;
@@ -308,10 +316,11 @@ export class RegularPolygon {
       const dx = p.x - this.center.x;
       const dy = p.y - this.center.y;
       const len = Math.hypot(dx, dy) || 1;
+      const off = scaled(this.extentPx(), 18);
       this.group.appendChild(
         text(VERTEX_NAMES[i] || `P${i + 1}`, {
-          x: p.x + (dx / len) * 18,
-          y: p.y + (dy / len) * 18,
+          x: p.x + (dx / len) * off,
+          y: p.y + (dy / len) * off,
           class: "vertex-label",
           "text-anchor": "middle",
           "dominant-baseline": "middle",

@@ -2,7 +2,7 @@ import { round1, nextId, PX_PER_UNIT, clamp, rotatePoint, midpoint } from "../ge
 import { el, text, clear, toSvgPoint, renderRemovableLabel, dimensionLine } from "../svgUtil.js";
 import { parseFieldInput } from "../fieldInput.js";
 import { paletteEntry } from "../palette.js";
-import { applyLabelScale, gap, extentOf, labelOffset, spreadLabels } from "../labelScale.js";
+import { applyLabelScale, gap, extentOf, labelOffset, spreadLabels, scaled } from "../labelScale.js";
 
 const DEG = Math.PI / 180;
 
@@ -273,8 +273,15 @@ export class Quadrilateral {
     if (this.group) this.group.remove();
   }
 
-  extentPx() {
+  ownExtentPx() {
     return extentOf(this.corners());
+  }
+
+  // Notation scales with the diagram, not with each shape on its own: two shapes
+  // butted into one composite have to be labelled at the same size to read as one
+  // drawing. Falls back to this shape's own size when it stands alone.
+  extentPx() {
+    return this.controller?.diagramExtent?.() || this.ownExtentPx();
   }
 
   render() {
@@ -324,6 +331,7 @@ export class Quadrilateral {
       [pts[1], pts[2], 2],
       [pts[3], pts[0], 2],
     ];
+    const tick = scaled(this.extentPx(), 5);
     for (const [a, b, count] of pairs) {
       const mid = midpoint(a, b);
       const dx = b.x - a.x;
@@ -334,14 +342,14 @@ export class Quadrilateral {
       const nx = -uy;
       const ny = ux;
       for (let i = 0; i < count; i++) {
-        const off = (i - (count - 1) / 2) * 5;
+        const off = (i - (count - 1) / 2) * tick;
         const c = { x: mid.x + ux * off, y: mid.y + uy * off };
         g.appendChild(
           el("line", {
-            x1: c.x + nx * 5,
-            y1: c.y + ny * 5,
-            x2: c.x - nx * 5,
-            y2: c.y - ny * 5,
+            x1: c.x + nx * tick,
+            y1: c.y + ny * tick,
+            x2: c.x - nx * tick,
+            y2: c.y - ny * tick,
             class: "equal-length-tick",
           })
         );
@@ -351,7 +359,7 @@ export class Quadrilateral {
   }
 
   renderRightAngles(pts) {
-    const size = 12;
+    const size = scaled(this.extentPx(), 12);
     for (let i = 0; i < 4; i++) {
       const V = pts[i];
       const prev = pts[(i + 3) % 4];
@@ -398,7 +406,7 @@ export class Quadrilateral {
     this.group.appendChild(
       el("line", { x1: apex.x, y1: apex.y, x2: foot.x, y2: foot.y, class: "construction-line" })
     );
-    const size = 11;
+    const size = scaled(this.extentPx(), 11);
     const up = this.unit(foot, apex);
     // The box opens back along the base towards the shape, so it reads as the corner
     // between the height and the base rather than pointing off into space.
@@ -447,7 +455,7 @@ export class Quadrilateral {
     const V = pts[0];
     const u1 = this.unit(V, pts[1]);
     const u2 = this.unit(V, pts[3]);
-    const r = 26;
+    const r = scaled(this.extentPx(), 26);
     const p1 = { x: V.x + u1.x * r, y: V.y + u1.y * r };
     const p2 = { x: V.x + u2.x * r, y: V.y + u2.y * r };
     const cross = u1.x * u2.y - u1.y * u2.x;
@@ -502,7 +510,12 @@ export class Quadrilateral {
     if (this.dimensionStyle && !hidden) {
       const off = { x: nx * clearance, y: ny * clearance };
       this.group.appendChild(
-        dimensionLine({ x: a.x + off.x, y: a.y + off.y }, { x: b.x + off.x, y: b.y + off.y }, 0)
+        dimensionLine(
+          { x: a.x + off.x, y: a.y + off.y },
+          { x: b.x + off.x, y: b.y + off.y },
+          0,
+          scaled(this.extentPx(), 1)
+        )
       );
     }
     const labelGap =
@@ -527,10 +540,11 @@ export class Quadrilateral {
       const dx = p.x - c.x;
       const dy = p.y - c.y;
       const len = Math.hypot(dx, dy) || 1;
+      const off = scaled(this.extentPx(), 18);
       this.group.appendChild(
         text(this.labels[i], {
-          x: p.x + (dx / len) * 18,
-          y: p.y + (dy / len) * 18,
+          x: p.x + (dx / len) * off,
+          y: p.y + (dy / len) * off,
           class: "vertex-label",
           "text-anchor": "middle",
           "dominant-baseline": "middle",

@@ -122,6 +122,15 @@ const controller = {
   snapNudge(shape) {
     return snapNudge(shape);
   },
+  // The size every shape scales its notation to. Deliberately reads ownExtentPx --
+  // extentPx asks the controller, so using it here would recurse.
+  diagramExtent() {
+    let biggest = 0;
+    for (const shape of shapes) {
+      if (typeof shape.ownExtentPx === "function") biggest = Math.max(biggest, shape.ownExtentPx());
+    }
+    return biggest;
+  },
 };
 
 // --- snapping, so shapes can be butted together into a composite ----------

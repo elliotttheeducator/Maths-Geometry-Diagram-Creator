@@ -8,19 +8,19 @@ const EXPORT_SCALE = 2; // render at 2x for crisp pasting into a Word doc / slid
 // This mirrors the relevant rules from style.css so exported files render identically.
 const EXPORT_STYLE = `
 text { font-family: Georgia, "Times New Roman", "Nimbus Roman", serif; }
-.shape-poly { stroke: #1a1a1a; stroke-width: 1.6; stroke-linejoin: round; }
-.shape-line { stroke: #1a1a1a; stroke-width: 1.6; fill: none; stroke-linecap: round; }
-.construction-line { stroke: #1a1a1a; stroke-width: 1.3; stroke-dasharray: 5 4; fill: none; }
-.hidden-edge { stroke: #1a1a1a; stroke-width: 1.2; stroke-dasharray: 6 5; fill: none; opacity: 0.75; }
-.dimension-shaft { stroke: #1a1a1a; stroke-width: 1.3; }
+.shape-poly { stroke: #1a1a1a; stroke-width: calc(1.6px * var(--label-scale, 1)); stroke-linejoin: round; }
+.shape-line { stroke: #1a1a1a; stroke-width: calc(1.6px * var(--label-scale, 1)); fill: none; stroke-linecap: round; }
+.construction-line { stroke: #1a1a1a; stroke-width: calc(1.3px * var(--label-scale, 1)); stroke-dasharray: calc(5px * var(--label-scale, 1)) calc(4px * var(--label-scale, 1)); fill: none; }
+.hidden-edge { stroke: #1a1a1a; stroke-width: calc(1.2px * var(--label-scale, 1)); stroke-dasharray: calc(6px * var(--label-scale, 1)) calc(5px * var(--label-scale, 1)); fill: none; opacity: 0.75; }
+.dimension-shaft { stroke: #1a1a1a; stroke-width: calc(1.3px * var(--label-scale, 1)); }
 .dimension-head { fill: #1a1a1a; stroke: none; }
 .vertex-label, .side-label, .angle-label { paint-order: stroke; stroke: #ffffff; stroke-width: calc(4px * var(--label-scale, 1)); stroke-linejoin: round; }
 .vertex-label { font-size: calc(16px * var(--label-scale, 1)); font-style: italic; fill: #1a1a1a; }
 .side-label, .angle-label { font-size: calc(15px * var(--label-scale, 1)); fill: #1a1a1a; }
-.angle-arc { fill: none; stroke: #1a1a1a; stroke-width: 1.3; }
-.right-angle-mark { fill: none; stroke: #1a1a1a; stroke-width: 1.3; }
-.parallel-chevron { stroke: #1a1a1a; stroke-width: 1.5; fill: none; }
-.equal-length-tick { stroke: #1a1a1a; stroke-width: 1.5; }
+.angle-arc { fill: none; stroke: #1a1a1a; stroke-width: calc(1.3px * var(--label-scale, 1)); }
+.right-angle-mark { fill: none; stroke: #1a1a1a; stroke-width: calc(1.3px * var(--label-scale, 1)); }
+.parallel-chevron { stroke: #1a1a1a; stroke-width: calc(1.5px * var(--label-scale, 1)); fill: none; }
+.equal-length-tick { stroke: #1a1a1a; stroke-width: calc(1.5px * var(--label-scale, 1)); }
 `;
 
 const CROP_PADDING = 24;

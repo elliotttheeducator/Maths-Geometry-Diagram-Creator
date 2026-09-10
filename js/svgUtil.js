@@ -72,7 +72,7 @@ export function renderRemovableLabel({ x, y, value, hidden, cssClass, onRemove, 
 // A textbook dimension line: double-headed arrow between two points, with a short
 // perpendicular tick at each end -- the convention for marking an overall length
 // outside the shape rather than labelling the edge itself.
-export function dimensionLine(from, to, offset = 0) {
+export function dimensionLine(from, to, offset = 0, scale = 1) {
   const dx = to.x - from.x;
   const dy = to.y - from.y;
   const len = Math.hypot(dx, dy) || 1;
@@ -86,8 +86,10 @@ export function dimensionLine(from, to, offset = 0) {
   const g = el("g", { class: "dimension-line" });
   g.appendChild(el("line", { x1: a.x, y1: a.y, x2: b.x, y2: b.y, class: "dimension-shaft" }));
 
-  const head = 7;
-  const wing = 3.2;
+  // Arrowheads and end ticks are notation, so they scale with the figure like
+  // everything else -- fixed ones vanish on a large diagram.
+  const head = 7 * scale;
+  const wing = 3.2 * scale;
   for (const [tip, dir] of [
     [a, 1],
     [b, -1],
@@ -100,7 +102,7 @@ export function dimensionLine(from, to, offset = 0) {
         class: "dimension-head",
       })
     );
-    const tick = 5;
+    const tick = 5 * scale;
     g.appendChild(
       el("line", {
         x1: tip.x + nx * tick,

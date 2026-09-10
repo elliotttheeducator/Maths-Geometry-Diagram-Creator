@@ -692,8 +692,15 @@ export class LineGraph {
     if (this.group) this.group.remove();
   }
 
-  extentPx() {
+  ownExtentPx() {
     return extentOf(this.vertices);
+  }
+
+  // Notation scales with the diagram, not with each shape on its own: two shapes
+  // butted into one composite have to be labelled at the same size to read as one
+  // drawing. Falls back to this shape's own size when it stands alone.
+  extentPx() {
+    return this.controller?.diagramExtent?.() || this.ownExtentPx();
   }
 
   render() {

@@ -8,13 +8,24 @@ import { withUnit } from "./units.js";
 // the label size has to be chosen from how big the figure actually is.
 //
 // TARGET_EXTENT is the figure size at which the base sizes look right; everything else
-// is scaled towards it, within limits that keep tiny figures readable and huge ones
-// from turning into billboards.
+// is scaled in proportion to it.
+//
+// The scaling is deliberately unbounded above. A side of 100 draws a figure 5000px
+// across, and any ceiling on the scale means the labels, strokes and marks stop growing
+// with it and shrink away to nothing -- the ink has to stay a constant *fraction* of
+// the figure for the diagram to look the same at every size. The floor only stops a
+// very small figure from being drawn in hairlines.
 const TARGET_EXTENT = 320;
 
 export function labelScale(extentPx) {
   if (!extentPx || !Number.isFinite(extentPx)) return 1;
-  return clamp(extentPx / TARGET_EXTENT, 0.9, 2.6);
+  return Math.max(extentPx / TARGET_EXTENT, 0.6);
+}
+
+// Any fixed-size piece of notation -- an arc radius, a right-angle box, a tick -- has
+// to scale the same way the text does, or it stops reading at large sizes too.
+export function scaled(extentPx, base) {
+  return base * labelScale(extentPx);
 }
 
 // Sets the scale the label CSS reads. Every label size, halo width and tick length is

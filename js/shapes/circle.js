@@ -2,7 +2,7 @@ import { dist, round1, nextId, PX_PER_UNIT, clamp } from "../geometry.js";
 import { el, clear, toSvgPoint, renderRemovableLabel } from "../svgUtil.js";
 import { parseFieldInput } from "../fieldInput.js";
 import { paletteEntry } from "../palette.js";
-import { applyLabelScale, gap, extentOf, labelOffset, spreadLabels } from "../labelScale.js";
+import { applyLabelScale, gap, extentOf, labelOffset, spreadLabels, scaled } from "../labelScale.js";
 
 const DEG = Math.PI / 180;
 
@@ -213,8 +213,15 @@ export class Circle {
     if (this.group) this.group.remove();
   }
 
-  extentPx() {
+  ownExtentPx() {
     return this.radiusPx * 2;
+  }
+
+  // Notation scales with the diagram, not with each shape on its own: two shapes
+  // butted into one composite have to be labelled at the same size to read as one
+  // drawing. Falls back to this shape's own size when it stands alone.
+  extentPx() {
+    return this.controller?.diagramExtent?.() || this.ownExtentPx();
   }
 
   render() {
@@ -250,7 +257,13 @@ export class Circle {
 
     // centre dot, and handles: one to size the radius, one to sweep the angle
     this.group.appendChild(
-      el("circle", { cx: this.center.x, cy: this.center.y, r: 2.5, fill: "#1a1a1a", class: "centre-dot" })
+      el("circle", {
+        cx: this.center.x,
+        cy: this.center.y,
+        r: scaled(this.extentPx(), 2.5),
+        fill: "#1a1a1a",
+        class: "centre-dot",
+      })
     );
     const radiusHandlePt = this.pointAt(this.mode === "circle" ? -90 : this.startAngleDeg);
     const rh = el("circle", { cx: radiusHandlePt.x, cy: radiusHandlePt.y, r: 6, class: "vertex-handle" });

@@ -2,7 +2,7 @@ import { round1, nextId, PX_PER_UNIT, clamp, midpoint } from "../geometry.js";
 import { el, clear, toSvgPoint, renderRemovableLabel } from "../svgUtil.js";
 import { parseFieldInput } from "../fieldInput.js";
 import { faceFill } from "../palette.js";
-import { applyLabelScale, gap, extentOf, labelOffset, spreadLabels } from "../labelScale.js";
+import { applyLabelScale, gap, extentOf, labelOffset, spreadLabels, scaled } from "../labelScale.js";
 
 const DEG = Math.PI / 180;
 
@@ -312,8 +312,15 @@ export class Prism {
     if (this.group) this.group.remove();
   }
 
-  extentPx() {
+  ownExtentPx() {
     return extentOf([...this.frontFace(), ...this.backFace()]);
+  }
+
+  // Notation scales with the diagram, not with each shape on its own: two shapes
+  // butted into one composite have to be labelled at the same size to read as one
+  // drawing. Falls back to this shape's own size when it stands alone.
+  extentPx() {
+    return this.controller?.diagramExtent?.() || this.ownExtentPx();
   }
 
   render() {
@@ -387,7 +394,7 @@ export class Prism {
     this.group.appendChild(
       el("line", { x1: apex.x, y1: apex.y, x2: foot.x, y2: foot.y, class: "construction-line" })
     );
-    const s = 11;
+    const s = scaled(this.extentPx(), 11);
     this.group.appendChild(
       el("path", {
         d: `M ${foot.x + s} ${foot.y} L ${foot.x + s} ${foot.y - s} L ${foot.x} ${foot.y - s}`,

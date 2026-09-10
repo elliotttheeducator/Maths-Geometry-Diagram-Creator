@@ -6,15 +6,25 @@ const NS = "http://www.w3.org/2000/svg";
 const SHEET_PADDING = 24;
 
 // Nothing in a spec-rendered diagram is interactive, so the shapes get a controller
-// that satisfies the interface and does nothing.
-const STATIC_CONTROLLER = {
-  onSelect() {},
-  onChange() {},
-  onInlineEdit() {},
-  snapNudge() {
-    return null;
-  },
-};
+// that satisfies the interface and does nothing -- except report the diagram's overall
+// size, which is what keeps every shape's notation scaled to the same drawing.
+function staticController(shapes) {
+  return {
+    onSelect() {},
+    onChange() {},
+    onInlineEdit() {},
+    snapNudge() {
+      return null;
+    },
+    diagramExtent() {
+      let biggest = 0;
+      for (const shape of shapes) {
+        if (typeof shape.ownExtentPx === "function") biggest = Math.max(biggest, shape.ownExtentPx());
+      }
+      return biggest;
+    },
+  };
+}
 
 let offscreenHost = null;
 
@@ -39,7 +49,8 @@ export function renderDiagramToSvg(items) {
   host().appendChild(svgEl);
 
   const { shapes, warnings } = buildDiagram(items);
-  for (const shape of shapes) shape.mount(layer, STATIC_CONTROLLER);
+  const controller = staticController(shapes);
+  for (const shape of shapes) shape.mount(layer, controller);
 
   let box = null;
   try {

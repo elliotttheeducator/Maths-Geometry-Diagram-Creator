@@ -14,7 +14,7 @@ import {
 import { el, text, clear, toSvgPoint, renderRemovableLabel } from "../svgUtil.js";
 import { parseFieldInput } from "../fieldInput.js";
 import { paletteEntry } from "../palette.js";
-import { applyLabelScale, gap, extentOf, labelOffset, spreadLabels } from "../labelScale.js";
+import { applyLabelScale, gap, extentOf, labelOffset, spreadLabels, scaled } from "../labelScale.js";
 
 const DEG = Math.PI / 180;
 
@@ -806,8 +806,15 @@ export class Triangle {
     if (this.group) this.group.remove();
   }
 
-  extentPx() {
+  ownExtentPx() {
     return extentOf(this.points);
+  }
+
+  // Notation scales with the diagram, not with each shape on its own: two shapes
+  // butted into one composite have to be labelled at the same size to read as one
+  // drawing. Falls back to this shape's own size when it stands alone.
+  extentPx() {
+    return this.controller?.diagramExtent?.() || this.ownExtentPx();
   }
 
   render() {
@@ -869,7 +876,7 @@ export class Triangle {
 
     const dirF = Math.atan2(F.y - V.y, F.x - V.x);
     const dirR = Math.atan2(R.y - V.y, R.x - V.x);
-    const r = 22;
+    const r = scaled(this.extentPx(), 22);
     let diff = ((dirR - dirF + Math.PI * 3) % (Math.PI * 2)) - Math.PI;
     const bisector = dirF + diff / 2;
     const labelR = r + labelOffset(`${round1(angleDeg)}°`, this.extentPx(), Math.cos(bisector), Math.sin(bisector), 6);
@@ -948,7 +955,7 @@ export class Triangle {
 
     // The box sits in the corner between the altitude and the base, on the side the
     // base actually runs -- for an external height that's back towards the triangle.
-    const size = 12;
+    const size = scaled(this.extentPx(), 12);
     const up = { x: (g.apex.x - g.foot.x) / (dist(g.apex, g.foot) || 1), y: (g.apex.y - g.foot.y) / (dist(g.apex, g.foot) || 1) };
     const towards = g.along < 0 ? 1 : -1; // point the box back along the base
     const bx = g.unit.x * towards;
@@ -989,7 +996,7 @@ export class Triangle {
   }
 
   rightAngleMark(V, dirF, dirR) {
-    const size = 14;
+    const size = scaled(this.extentPx(), 14);
     const uF = { x: Math.cos(dirF), y: Math.sin(dirF) };
     const uR = { x: Math.cos(dirR), y: Math.sin(dirR) };
     const p1 = { x: V.x + uF.x * size, y: V.y + uF.y * size };
@@ -1015,6 +1022,7 @@ export class Triangle {
       else groups.push({ len, indices: [i] });
     });
 
+    const tick = scaled(this.extentPx(), 5);
     let markIndex = 0;
     for (const grp of groups) {
       if (grp.indices.length < 2) continue;
@@ -1027,14 +1035,14 @@ export class Triangle {
         const ux = (b.x - a.x) / len;
         const uy = (b.y - a.y) / len;
         for (let t = 0; t < markIndex; t++) {
-          const off = (t - (markIndex - 1) / 2) * 5;
+          const off = (t - (markIndex - 1) / 2) * tick;
           const c = { x: mid.x + ux * off, y: mid.y + uy * off };
           g.appendChild(
             el("line", {
-              x1: c.x - uy * 5,
-              y1: c.y + ux * 5,
-              x2: c.x + uy * 5,
-              y2: c.y - ux * 5,
+              x1: c.x - uy * tick,
+              y1: c.y + ux * tick,
+              x2: c.x + uy * tick,
+              y2: c.y - ux * tick,
               class: "equal-length-tick",
             })
           );
@@ -1225,7 +1233,7 @@ export class Triangle {
     const dx = p.x - centroid.x;
     const dy = p.y - centroid.y;
     const len = Math.hypot(dx, dy) || 1;
-    const offset = 20;
+    const offset = scaled(this.extentPx(), 20);
     const t = text(this.labels[i], {
       x: p.x + (dx / len) * offset,
       y: p.y + (dy / len) * offset,
